@@ -1,0 +1,102 @@
+import json
+import os
+import sys
+
+def calculate_task3_flags(metrics):
+    """Calculate flags based solely on Task 3 requirements."""
+    flags = []
+    
+    # 1. Lines of Code
+    lines = metrics['lines']
+    if lines > 800:
+        flags.append('VERY_LARGE_COMPONENT')
+    elif lines > 500:
+        flags.append('LARGE_COMPONENT')
+        
+    # 2. Methods
+    if metrics['methods'] > 15:
+        flags.append('MANY_METHODS')
+        
+    # 3. Computed Properties
+    if metrics['computed'] > 10:
+        flags.append('MANY_COMPUTED')
+        
+    # 4. Watchers
+    if metrics['watchers'] > 5:
+        flags.append('MANY_WATCHERS')
+        
+    # 5. Template Size
+    if metrics['templateLines'] > 200:
+        flags.append('COMPLEX_TEMPLATE')
+        
+    # 6. Child Component Usage
+    if metrics['childComponents'] > 5:
+        flags.append('MANY_CHILDREN')
+        
+    return flags
+
+def main():
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    export_json_path = os.path.join(root_dir, 'task2_db_export.json')
+    output_json_path = os.path.join(root_dir, 'task3', 'component_complexity.json')
+    
+    if not os.path.exists(export_json_path):
+        print(f"Error: {export_json_path} not found. Ensure Task 2 has been run.")
+        sys.exit(1)
+        
+    print(f"Loading data from {export_json_path}...")
+    with open(export_json_path, 'r', encoding='utf-8') as f:
+        task2_data = json.load(f)
+        
+    vue_files = task2_data.get('vue_files', [])
+    
+    component_complexity = []
+    
+    for f_data in vue_files:
+        file_path = f_data.get('file_path', '')
+        
+        # Calculate true total lines by reading the file if it exists
+        total_lines = 0
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as src:
+                total_lines = sum(1 for line in src)
+        else:
+            # Fallback approximation if file is missing (though it shouldn't be)
+            total_lines = f_data.get('script_lines', 0) + f_data.get('template_lines', 0) + 10
+            
+        # Reformat relative to src/
+        # Normalize path separators
+        normalized_path = file_path.replace('\\', '/')
+        if 'src/' in normalized_path:
+            clean_file_path = "src/" + normalized_path.split('src/')[-1]
+        else:
+            clean_file_path = file_path
+
+        # Gather metrics matching Task 3 requirements
+        metrics = {
+            "file": clean_file_path,
+            "lines": total_lines,
+            "methods": f_data.get('methods', 0),
+            "computed": f_data.get('computed', 0),
+            "watchers": f_data.get('watchers', 0),
+            "templateLines": f_data.get('template_lines', 0),
+            "childComponents": f_data.get('child_components', 0)
+        }
+        
+        # Determine flags for Task 3
+        metrics['flags'] = calculate_task3_flags(metrics)
+        
+        component_complexity.append(metrics)
+        
+    output_data = {
+        "componentComplexity": component_complexity
+    }
+    
+    print(f"Writing {len(component_complexity)} records to {output_json_path}...")
+    with open(output_json_path, 'w', encoding='utf-8') as f:
+        json.dump(output_data, f, indent=2)
+        
+    print("Done! Task 3 Report Generated Successfully.")
+
+if __name__ == '__main__':
+    main()

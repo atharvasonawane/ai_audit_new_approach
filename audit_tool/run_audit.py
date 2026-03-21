@@ -140,6 +140,17 @@ def main():
     export_db_to_json(cfg, str(db_json_path))
     print(f"  DB Export : {db_json_path}")
     
+    # 7. Generate Task 3 Component Complexity JSON
+    try:
+        from task3.task3_exporter import main as task3_main
+        print()
+        print("=" * 65)
+        print("  TASK 3: COMPONENT COMPLEXITY SCANNER")
+        print("=" * 65)
+        task3_main()
+    except Exception as e:
+        logger.error("Failed to run Task 3 exporter: %s", e)
+    
     print("=" * 65)
     print()
 
