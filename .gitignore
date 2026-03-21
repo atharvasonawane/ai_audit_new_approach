@@ -1,0 +1,29 @@
+# Node/Vue
+node_modules/
+
+# Python Virtual Environments
+venv/
+env/
+.env
+
+# Python Caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE files
+.vscode/
+.idea/
+
+# Custom Exclusions for Code Audit Librarian
+*.json
+!project_config.yaml
+
+# Test Files
+*adminLogin.vue
+*adminlogin.vue
+
+# Documentation and Notes
+Task2.txt
+*.txt
