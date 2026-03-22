@@ -22,6 +22,7 @@ CONFIG_PATH = str(TASK2_BASE / "config" / "project_config.yaml")
 sys.path.insert(0, str(TASK2_BASE))
 import yaml
 from extractors.vue_parser import parse_vue_file
+from db.db_writer import _get_connection, _get_file_id
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)s -- %(message)s")
 logger = logging.getLogger("task4_ui_extractor")
@@ -109,6 +110,7 @@ def process_vue_file(file_path):
         
     result = {
         "file": clean_file_path,
+        "raw_file_path": str(Path(file_path).resolve()),
         "uses_i18n": False,
         "buttons": [],
         "headers": [],
@@ -228,6 +230,17 @@ def main():
         sys.exit(1)
         
     cfg = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
+    
+    from dotenv import load_dotenv
+    load_dotenv()
+    if "db" not in cfg:
+        cfg["db"] = {}
+    cfg["db"]["host"]     = os.getenv("MYSQL_HOST", cfg["db"].get("host", "localhost"))
+    cfg["db"]["port"]     = int(os.getenv("MYSQL_PORT", cfg["db"].get("port", 3306)))
+    cfg["db"]["user"]     = os.getenv("MYSQL_USER", cfg["db"].get("user", "root"))
+    cfg["db"]["password"] = os.getenv("MYSQL_PASSWORD", cfg["db"].get("password", ""))
+    cfg["db"]["database"] = os.getenv("MYSQL_DATABASE", cfg["db"].get("database", "code_audit_db"))
+
     base_path = cfg.get("base_path", "")
     
     if not base_path:
@@ -267,6 +280,53 @@ def main():
     out_dir.mkdir(exist_ok=True)
     out_path = out_dir / "ui_extraction.json"
     
+    # --- Write to MySQL Database ---
+    try:
+        conn = _get_connection(cfg)
+        cur = conn.cursor()
+        
+        # Create a robust pathname map bypassing Windows slash and casing weirdness
+        cur.execute("SELECT id, file_path FROM vue_files")
+        file_map = {row[1].replace('\\', '/').lower(): row[0] for row in cur.fetchall()}
+        
+        elements_inserted = 0
+        for res in extraction_results:
+            clean_path = res.get("file", "").lower()
+            file_id = None
+            for db_path, fid in file_map.items():
+                if db_path.endswith(clean_path):
+                    file_id = fid
+                    break
+                    
+            if not file_id:
+                logger.warning(f"Could not link DB record for {res.get('file')}")
+            
+            if file_id:
+                for btn in res["buttons"]:
+                    cur.execute("INSERT INTO ui_extractions (file_id, element_category, text_content, css_class, text_type) VALUES (%s, %s, %s, %s, %s)", (file_id, "button", btn["text"], btn.get("class", ""), btn["type"]))
+                    elements_inserted += 1
+                for hdr in res["headers"]:
+                    cur.execute("INSERT INTO ui_extractions (file_id, element_category, text_content, css_class, text_type) VALUES (%s, %s, %s, %s, %s)", (file_id, "header", hdr["text"], "", hdr["type"]))
+                    elements_inserted += 1
+                for vt in res["visibleTexts"]:
+                    cur.execute("INSERT INTO ui_extractions (file_id, element_category, text_content, css_class, text_type) VALUES (%s, %s, %s, %s, %s)", (file_id, "visible_text", vt["text"], "", vt["type"]))
+                    elements_inserted += 1
+                    
+        conn.commit()
+        logger.info(f"Successfully wrote {elements_inserted} UI elements natively into MySQL database (ui_extractions)")
+    except Exception as e:
+        if 'conn' in locals() and conn.is_connected():
+            conn.rollback()
+        logger.error(f"Failed to write to MySQL db: {e}")
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cur.close()
+            conn.close()
+
+    # Now drop raw_file_path specifically to preserve JSON schema exactly as required
+    for res in extraction_results:
+        res.pop("raw_file_path", None)
+        
     final_json = {
         "uiExtraction": extraction_results
     }

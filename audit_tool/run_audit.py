@@ -134,6 +134,20 @@ def main():
     print()
     print(f"  DB   : {cfg['db']['database']}.vue_files ({len(results)} rows)")
     
+    # NEW STEP: Extract UI elements (Task 4)
+    # Placed here so db_writer.py export captures the new ui_extractions schema implicitly.
+    try:
+        if str(BASE / "task4") not in sys.path:
+            sys.path.insert(0, str(BASE / "task4"))
+        from task4_ui_extractor import main as task4_main
+        print()
+        print("=" * 65)
+        print("  TASK 4: VUE UI EXTRACTION SCANNER")
+        print("=" * 65)
+        task4_main()
+    except Exception as e:
+        logger.error("Failed to run Task 4 UI Extractor: %s", e)
+
     # 6. Export Database to JSON
     db_json_path = BASE / "task2_db_export.json"
     logger.info("Exporting native database tables to %s...", db_json_path)

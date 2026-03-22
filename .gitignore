@@ -28,3 +28,4 @@ __pycache__/
 Task2.txt
 Task3_extracted.txt
 *.txt
+!requirements.txt

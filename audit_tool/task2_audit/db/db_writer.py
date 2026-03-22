@@ -63,6 +63,17 @@ _DDL = [
         FOREIGN KEY (file_id) REFERENCES vue_files(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    """
+    CREATE TABLE IF NOT EXISTS ui_extractions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        file_id INT NOT NULL,
+        element_category VARCHAR(50),
+        text_content TEXT,
+        css_class VARCHAR(255),
+        text_type VARCHAR(50),
+        FOREIGN KEY (file_id) REFERENCES vue_files(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 ]
 
 # Flag → category mapping
@@ -124,7 +135,7 @@ def setup_schema(cfg: dict) -> None:
 
     # Drop tables in reverse FK order so constraints don't block the drop
     cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-    for table in ("file_flags", "api_calls", "vue_files"):
+    for table in ("ui_extractions", "file_flags", "api_calls", "vue_files"):
         cur.execute(f"DROP TABLE IF EXISTS `{table}`")
         logger.debug("[db_writer] Dropped table '%s'.", table)
     cur.execute("SET FOREIGN_KEY_CHECKS = 1")
