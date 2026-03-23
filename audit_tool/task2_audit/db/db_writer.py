@@ -74,6 +74,18 @@ _DDL = [
         FOREIGN KEY (file_id) REFERENCES vue_files(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    """
+    CREATE TABLE IF NOT EXISTS ui_defects (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        file_id INT NOT NULL,
+        defect_type VARCHAR(50),
+        severity VARCHAR(20),
+        element_type VARCHAR(50),
+        trigger_text TEXT,
+        expected_text TEXT,
+        FOREIGN KEY (file_id) REFERENCES vue_files(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 ]
 
 # Flag → category mapping
@@ -135,7 +147,7 @@ def setup_schema(cfg: dict) -> None:
 
     # Drop tables in reverse FK order so constraints don't block the drop
     cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-    for table in ("ui_extractions", "file_flags", "api_calls", "vue_files"):
+    for table in ("ui_defects", "ui_extractions", "file_flags", "api_calls", "vue_files"):
         cur.execute(f"DROP TABLE IF EXISTS `{table}`")
         logger.debug("[db_writer] Dropped table '%s'.", table)
     cur.execute("SET FOREIGN_KEY_CHECKS = 1")
@@ -278,6 +290,10 @@ def export_db_to_json(cfg: dict, output_path: str) -> None:
         cur.execute("SELECT * FROM file_flags")
         export_data["file_flags"] = cur.fetchall()
         
+        # 4. ui_defects
+        cur.execute("SELECT * FROM ui_defects")
+        export_data["ui_defects"] = cur.fetchall()
+        
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(export_data, f, indent=2)
             
@@ -285,6 +301,33 @@ def export_db_to_json(cfg: dict, output_path: str) -> None:
         
     except Exception as exc:
         logger.error("[db_writer] Failed to export database to JSON: %s", exc)
+    finally:
+        cur.close()
+        conn.close()
+
+def write_ui_defect(cfg: dict, defect: dict) -> None:
+    """
+    Insert a single ui_defect into the MySQL database.
+    """
+    conn = _get_connection(cfg)
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO ui_defects
+                (file_id, defect_type, severity, element_type, trigger_text, expected_text)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            defect.get("file_id", 0),
+            defect.get("defect_type", ""),
+            defect.get("severity", ""),
+            defect.get("element_type", ""),
+            defect.get("trigger_text", ""),
+            defect.get("expected_text", ""),
+        ))
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        logger.error("[db_writer] Failed to write ui_defect: %s", exc)
     finally:
         cur.close()
         conn.close()

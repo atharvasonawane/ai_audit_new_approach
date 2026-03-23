@@ -164,6 +164,19 @@ def main():
         task3_main()
     except Exception as e:
         logger.error("Failed to run Task 3 exporter: %s", e)
+        
+    # 8. Task 5 UI Consistency and Spell Checker
+    try:
+        if str(BASE / "task5") not in sys.path:
+            sys.path.insert(0, str(BASE / "task5"))
+        from task5.ui_consistency_checker import main as task5_main
+        print()
+        print("=" * 65)
+        print("  TASK 5: UI CONSISTENCY & SPELL CHECKER")
+        print("=" * 65)
+        task5_main(cfg)
+    except Exception as e:
+        logger.error("Failed to run Task 5 checker: %s", e)
     
     print("=" * 65)
     print()
