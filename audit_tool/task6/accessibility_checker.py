@@ -132,6 +132,8 @@ def process_vue_file(file_path, cfg, report_list):
     module_name = cfg.get("module", "unknown")
     
     norm_path = str(file_path).replace("\\", "/")
+    
+    # Determine clean_file_path: prefer src/-relative, else use full absolute path
     if "src/" in norm_path:
         clean_file_path = "src/" + norm_path.split("src/")[-1]
     else:
@@ -143,11 +145,15 @@ def process_vue_file(file_path, cfg, report_list):
     file_id = 0
     try:
         cur.execute("SELECT id, file_path FROM vue_files")
-        file_map = {row[1].replace('\\', '/').lower(): row[0] for row in cur.fetchall()}
+        rows = cur.fetchall()
         
-        for db_path, fid in file_map.items():
-            if db_path.endswith(clean_file_path.lower()):
-                file_id = fid
+        # Build normalized suffix map
+        norm_clean = clean_file_path.lower().replace("\\", "/")
+        for row in rows:
+            db_path_norm = row[1].replace("\\", "/").lower()
+            # Match if either is a suffix of the other
+            if db_path_norm.endswith(norm_clean) or norm_clean.endswith(db_path_norm.split("/src/")[-1] if "/src/" in db_path_norm else db_path_norm):
+                file_id = row[0]
                 break
     except Exception as e:
         logger.error(f"Error fetching file ID for {clean_file_path}: {e}")

@@ -208,9 +208,16 @@ def main():
     except Exception as e:
         logger.error("Failed to run Task 6 checker: %s", e)
     
-    print("=" * 65)
-    print()
-
+    # 10. Task 7 Unified Issue Detection Engine
+    try:
+        if str(BASE / "task7") not in sys.path:
+            sys.path.insert(0, str(BASE / "task7"))
+        import task7.issue_detector as task7_main
+        task7_main.main(cfg)
+    except Exception as e:
+        logger.error("Failed to run Task 7 Issue Detector: %s", e)
+    
+    # We remove the old final summary print here because task7.issue_detector handles it now.
 
 if __name__ == "__main__":
     main()
