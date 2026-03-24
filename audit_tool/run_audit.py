@@ -41,7 +41,7 @@ logging.basicConfig(
 )
 # Silence noisy sub-loggers during scan
 for noisy in ("extractors.vue_parser", "extractors.script_cleaner",
-              "extractors.mql_extractor", "extractors.complexity_checker",
+              "extractors.api_extractor", "extractors.complexity_checker",
               "extractors.template_extractor"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 

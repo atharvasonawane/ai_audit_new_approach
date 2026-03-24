@@ -46,6 +46,7 @@ _DDL = [
     CREATE TABLE IF NOT EXISTS api_calls (
         id           INT AUTO_INCREMENT PRIMARY KEY,
         file_id      INT NOT NULL,
+        api_type     VARCHAR(20),
         method_name  VARCHAR(255),
         full_match   VARCHAR(300),
         in_mounted   TINYINT(1) DEFAULT 0,
@@ -241,10 +242,11 @@ def write_file_result(cfg: dict, result: dict) -> None:
         for call in mql_calls:
             cur.execute("""
                 INSERT INTO api_calls
-                    (file_id, method_name, full_match, in_mounted, in_loop, line_number)
-                VALUES (%s,%s,%s,%s,%s,%s)
+                    (file_id, api_type, method_name, full_match, in_mounted, in_loop, line_number)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
             """, (
                 file_id,
+                call.get("type", "MQL"),
                 call.get("method", ""),
                 call.get("full_match", ""),
                 1 if call.get("in_mounted") else 0,

@@ -40,7 +40,7 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
     from extractors.script_cleaner     import clean_script
     from extractors.complexity_checker import check_complexity
     from extractors.template_extractor import extract_template_metrics
-    from extractors.mql_extractor      import extract_mql_calls
+    from extractors.api_extractor      import extract_api_calls
     from checkers.flag_engine          import evaluate_flags, summarise_flags
 
     # Use the dynamic module name from cfg (calculated in run_audit.py)
@@ -77,8 +77,8 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
         # Step 4: Template
         template = extract_template_metrics(tmpl_node, source_bytes)
 
-        # Step 5: MQL
-        mql_data = extract_mql_calls(clean, raw_script, filepath, config_path)
+        # Step 5: API
+        api_data = extract_api_calls(clean, raw_script, filepath, config_path)
 
         # Step 6: Flags
         flags = evaluate_flags(
@@ -86,8 +86,8 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
             methods           = complexity["methods"],
             computed          = complexity["computed"],
             watchers          = complexity["watchers"],
-            api_calls         = mql_data["calls"],
-            duplicate_names   = mql_data["methods_with_same_name"],
+            api_calls         = api_data["calls"],
+            duplicate_names   = api_data["methods_with_same_name"],
             template_lines    = template["template_lines"],
             child_components  = template["child_components"],
             max_nesting_depth = template["max_nesting_depth"],
@@ -99,16 +99,16 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
 
         return {
             "file"      : filepath,
-            "module"    : mql_data.get("module") or module,
+            "module"    : api_data.get("module") or module,
             "confidence": confidence,
             "extracted_metrics": {
                 "script_lines"    : complexity["lines"],
                 "methods"         : complexity["methods"],
                 "computed"        : complexity["computed"],
                 "watchers"        : complexity["watchers"],
-                "api_total"       : mql_data["total_count"],
-                "api_in_mounted"  : mql_data["mounted_count"],
-                "api_duplicates"  : mql_data["methods_with_same_name"],
+                "api_total"       : api_data["total_count"],
+                "api_in_mounted"  : api_data["mounted_count"],
+                "api_duplicates"  : api_data["methods_with_same_name"],
                 "template_lines"  : template["template_lines"],
                 "child_components": template["child_components"],
                 "max_nest_depth"  : template["max_nesting_depth"],
@@ -116,7 +116,7 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
                 "payload_depth"   : 0,
                 "payload_size_kb" : 0.0,
             },
-            "api_calls"         : mql_data["calls"],
+            "api_calls"         : api_data["calls"],
             "flags_triggered"   : flags,
             "flags_by_category" : flag_summary,
             "flags_count"       : len(flags),

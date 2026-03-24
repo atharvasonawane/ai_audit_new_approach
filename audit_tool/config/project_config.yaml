@@ -7,6 +7,13 @@ mql:
   pattern: '\w+\.\[(\w+)\]'
   confidence: HIGH
 
+generic_api:
+  patterns:
+    - 'axios\.(get|post|put|delete|patch|request)\('
+    - '(?<!\.)\bfetch\('
+    - 'this\.\$http\.(get|post|put|delete|patch)\('
+  confidence: MEDIUM
+
 spelling:
   ignore_words:
     - DU

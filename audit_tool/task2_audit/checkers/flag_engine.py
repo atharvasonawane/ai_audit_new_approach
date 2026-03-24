@@ -25,8 +25,8 @@ INPUT CONTRACT (all arguments to evaluate_flags):
         computed        (int)  : number of computed properties
         watchers        (int)  : number of watchers
 
-    From mql_extractor.py:
-        api_calls       (list) : list of call dicts (each has in_mounted, in_loop)
+    From api_extractor.py:
+        api_calls       (list) : list of call dicts (each has in_mounted, in_loop, type)
         duplicate_names (list) : method names called more than once
 
     From template_extractor.py:
@@ -115,7 +115,7 @@ def evaluate_flags(
         computed         (int)  : Number of computed properties.
         watchers         (int)  : Number of watchers.
         api_calls        (list) : List of call dicts from mql_extractor.
-                                  Each dict has keys: method, full_match,
+                                  Each dict has keys: type, method, full_match,
                                   in_mounted (bool), in_loop (bool),
                                   line_number.
         duplicate_names  (list) : Method names with more than one call.
@@ -541,7 +541,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(BASE))
     from extractors.vue_parser     import parse_vue_file
     from extractors.script_cleaner import clean_script
-    from extractors.mql_extractor  import extract_mql_calls
+    from extractors.api_extractor  import extract_api_calls
 
     CONFIG = str(BASE / "config" / "project_config.yaml")
     SAMPLE = str(BASE / "sample" / "sample.vue")
@@ -549,7 +549,9 @@ if __name__ == "__main__":
     parsed    = parse_vue_file(SAMPLE)
     raw       = parsed.get("script_text") or ""
     clean     = clean_script(raw)
-    mql_data  = extract_mql_calls(clean, raw, SAMPLE, CONFIG)
+    api_data  = extract_api_calls(clean, raw, SAMPLE, CONFIG)
+    api_calls = api_data["calls"]
+    dup_names = api_data["methods_with_same_name"]
 
     # adminLogin.vue known metrics (approximate from file inspection)
     sample_flags = evaluate_flags(
@@ -557,8 +559,8 @@ if __name__ == "__main__":
         methods          = 20,     # methods block has ~20 functions
         computed         = 1,
         watchers         = 0,
-        api_calls        = mql_data["calls"],
-        duplicate_names  = mql_data["methods_with_same_name"],
+        api_calls        = api_calls,
+        duplicate_names  = dup_names,
         template_lines   = 309,    # template block ends at line 309
         child_components = 2,      # Dropdown, InputText
         max_nesting_depth= 3,
