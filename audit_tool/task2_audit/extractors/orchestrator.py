@@ -43,7 +43,8 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
     from extractors.mql_extractor      import extract_mql_calls
     from checkers.flag_engine          import evaluate_flags, summarise_flags
 
-    module     = cfg.get("module", "unknown")
+    # Use the dynamic module name from cfg (calculated in run_audit.py)
+    module = cfg.get("module", "unknown")
     confidence = cfg.get("mql", {}).get("confidence", "HIGH")
 
     # Default empty result
@@ -98,7 +99,7 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
 
         return {
             "file"      : filepath,
-            "module"    : mql_data.get("module", module),
+            "module"    : mql_data.get("module") or module,
             "confidence": confidence,
             "extracted_metrics": {
                 "script_lines"    : complexity["lines"],

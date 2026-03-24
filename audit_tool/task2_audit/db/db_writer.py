@@ -208,6 +208,7 @@ def write_file_result(cfg: dict, result: dict) -> None:
                  api_total, api_mounted, flag_count, confidence, scanned_at)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON DUPLICATE KEY UPDATE
+                module=VALUES(module),
                 script_lines=VALUES(script_lines), methods=VALUES(methods),
                 computed=VALUES(computed), watchers=VALUES(watchers),
                 template_lines=VALUES(template_lines),

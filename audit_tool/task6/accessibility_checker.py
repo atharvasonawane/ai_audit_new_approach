@@ -128,13 +128,14 @@ def process_vue_file(file_path, cfg, report_list):
     template_node = parsed.get("template_node")
     style_text = parsed.get("style_text")
     
+    # Use the dynamic module name from cfg (calculated in run_audit.py)
+    module_name = cfg.get("module", "unknown")
+    
     norm_path = str(file_path).replace("\\", "/")
     if "src/" in norm_path:
         clean_file_path = "src/" + norm_path.split("src/")[-1]
     else:
         clean_file_path = norm_path
-        
-    module_name = clean_file_path.split("/")[1] if "/" in clean_file_path else "unknown"
     
     # Needs db file_id (we assume run_audit created vue_files)
     conn = _get_connection(cfg)

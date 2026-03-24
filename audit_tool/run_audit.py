@@ -50,6 +50,23 @@ logger = logging.getLogger("run_audit")
 # ── Load config ───────────────────────────────────────────────────────────────
 cfg      = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
 
+# Dynamically override the module name based on the base_path so it never has to be manually set
+import re
+base_path_str = cfg.get("base_path", "").replace("\\", "/")
+if base_path_str:
+    # Specifically target the folder one level ABOVE 'client'
+    match = re.search(r"([^/]+)/client", base_path_str, re.IGNORECASE)
+    if match:
+        cfg["module"] = match.group(1)
+    else:
+        # Fallback 1: If no 'client', look for folder above 'src'
+        match = re.search(r"([^/]+)/src", base_path_str, re.IGNORECASE)
+        if match:
+            cfg["module"] = match.group(1)
+        else:
+            # Fallback 2: Just use the leaf folder name
+            cfg["module"] = Path(base_path_str).name
+
 # Load environment variables and override database credentials safely
 load_dotenv()
 if "db" not in cfg:
