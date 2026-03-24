@@ -28,4 +28,6 @@ __pycache__/
 Task2.txt
 Task3_extracted.txt
 *.txt
+*.docx
 !requirements.txt
+!*web_tech_words.txt

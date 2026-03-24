@@ -86,6 +86,22 @@ _DDL = [
         FOREIGN KEY (file_id) REFERENCES vue_files(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    """
+    CREATE TABLE IF NOT EXISTS accessibility_defects (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        file_id INT NOT NULL,
+        file_path VARCHAR(1024),
+        module VARCHAR(255),
+        rule VARCHAR(100),
+        defect_type VARCHAR(100),
+        element TEXT,
+        severity VARCHAR(20),
+        line_number INT,
+        confidence VARCHAR(20),
+        scanned_at DATETIME,
+        FOREIGN KEY (file_id) REFERENCES vue_files(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 ]
 
 # Flag → category mapping
@@ -147,7 +163,7 @@ def setup_schema(cfg: dict) -> None:
 
     # Drop tables in reverse FK order so constraints don't block the drop
     cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-    for table in ("ui_defects", "ui_extractions", "file_flags", "api_calls", "vue_files"):
+    for table in ("accessibility_defects", "ui_defects", "ui_extractions", "file_flags", "api_calls", "vue_files"):
         cur.execute(f"DROP TABLE IF EXISTS `{table}`")
         logger.debug("[db_writer] Dropped table '%s'.", table)
     cur.execute("SET FOREIGN_KEY_CHECKS = 1")
@@ -294,6 +310,14 @@ def export_db_to_json(cfg: dict, output_path: str) -> None:
         cur.execute("SELECT * FROM ui_defects")
         export_data["ui_defects"] = cur.fetchall()
         
+        # 5. accessibility_defects
+        cur.execute("SELECT * FROM accessibility_defects")
+        defects = cur.fetchall()
+        for d in defects:
+            if isinstance(d.get("scanned_at"), datetime):
+                d["scanned_at"] = d["scanned_at"].strftime("%Y-%m-%d %H:%M:%S")
+        export_data["accessibility_defects"] = defects
+        
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(export_data, f, indent=2)
             
@@ -328,6 +352,37 @@ def write_ui_defect(cfg: dict, defect: dict) -> None:
     except Exception as exc:
         conn.rollback()
         logger.error("[db_writer] Failed to write ui_defect: %s", exc)
+    finally:
+        cur.close()
+        conn.close()
+
+def write_accessibility_defect(cfg: dict, defect: dict) -> None:
+    """
+    Insert a single accessibility_defect into the MySQL database.
+    """
+    conn = _get_connection(cfg)
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO accessibility_defects
+                (file_id, file_path, module, rule, defect_type, element, severity, line_number, confidence, scanned_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            defect.get("file_id", 0),
+            defect.get("file_path", ""),
+            defect.get("module", ""),
+            defect.get("rule", ""),
+            defect.get("defect_type", ""),
+            defect.get("element", ""),
+            defect.get("severity", ""),
+            defect.get("line_number", 0),
+            defect.get("confidence", "HIGH"),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ))
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        logger.error("[db_writer] Failed to write accessibility_defect: %s", exc)
     finally:
         cur.close()
         conn.close()

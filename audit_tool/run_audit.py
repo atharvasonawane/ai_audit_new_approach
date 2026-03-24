@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 # ── Setup ────────────────────────────────────────────────────────────────────
 BASE        = Path(__file__).parent
 TASK2_BASE  = BASE / "task2_audit"
-CONFIG_PATH = str(TASK2_BASE / "config" / "project_config.yaml")
+CONFIG_PATH = str(BASE / "config" / "project_config.yaml")
 
 # Insert task2_audit into sys.path so inner imports (extractors, db) resolve perfectly
 sys.path.insert(0, str(TASK2_BASE))
@@ -177,6 +177,19 @@ def main():
         task5_main(cfg)
     except Exception as e:
         logger.error("Failed to run Task 5 checker: %s", e)
+        
+    # 9. Task 6 UI Accessibility & Usability Compliance Checker
+    try:
+        if str(BASE / "task6") not in sys.path:
+            sys.path.insert(0, str(BASE / "task6"))
+        from task6.accessibility_checker import main as task6_main
+        print()
+        print("=" * 65)
+        print("  TASK 6: UI ACCESSIBILITY CHECKER")
+        print("=" * 65)
+        task6_main(cfg)
+    except Exception as e:
+        logger.error("Failed to run Task 6 checker: %s", e)
     
     print("=" * 65)
     print()

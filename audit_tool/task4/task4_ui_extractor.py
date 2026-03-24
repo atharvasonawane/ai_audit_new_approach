@@ -17,7 +17,7 @@ from pathlib import Path
 # Setup paths
 BASE = Path(__file__).parent.parent
 TASK2_BASE = BASE / "task2_audit"
-CONFIG_PATH = str(TASK2_BASE / "config" / "project_config.yaml")
+CONFIG_PATH = str(BASE / "config" / "project_config.yaml")
 
 sys.path.insert(0, str(TASK2_BASE))
 import yaml

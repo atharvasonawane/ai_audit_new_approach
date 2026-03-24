@@ -18,5 +18,5 @@ db:
   host: localhost
   port: 3306
   user: root
-  password: "mysql@atharva04"
+  password: ""
   database: code_audit_db
