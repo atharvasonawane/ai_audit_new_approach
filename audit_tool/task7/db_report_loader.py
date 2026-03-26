@@ -123,3 +123,13 @@ def load_high_risk_files(cfg: dict) -> list:
     """
     results = _fetch_all(cfg, query)
     return [row["file_path"] for row in results]
+
+def search_files(cfg: dict, pattern: str) -> list:
+    """
+    Search for files matching a partial path or name.
+    Useful for helping the agent find the exact file_path.
+    """
+    query = "SELECT file_path FROM vue_files WHERE file_path LIKE %s LIMIT 10"
+    params = (f"%{pattern}%",)
+    results = _fetch_all(cfg, query, params)
+    return [row["file_path"] for row in results]
