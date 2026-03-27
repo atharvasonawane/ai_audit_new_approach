@@ -5,6 +5,8 @@ node_modules/
 venv/
 env/
 .env
+.env.*
+!.env.example
 
 # Python Caches
 __pycache__/
@@ -18,7 +20,8 @@ __pycache__/
 
 # Custom Exclusions for Code Audit Librarian
 *.json
-!project_config.yaml
+# NOTE: project_config.yaml is tracked intentionally but MUST NOT contain real credentials.
+# All secrets (DB password, etc.) must live in .env — never hardcode them in the yaml.
 
 # Test Files
 *adminLogin.vue

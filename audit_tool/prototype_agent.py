@@ -265,7 +265,7 @@ if __name__ == "__main__":
         print("        Check DB_CFG credentials and confirm MySQL is running.")
         sys.exit(1)
 
-    llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0.0, num_ctx=8192)
+    llm = ChatOllama(model="qwen2.5-coder:3b", temperature=0.0, num_ctx=8192)
     system_msg = SystemMessage(content=SYSTEM_INSTRUCTIONS)
     conversation_turns = []
 
