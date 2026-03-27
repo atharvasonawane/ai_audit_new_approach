@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
+
 # ==========================================
 # 1. SECURE CONFIGURATION LOADING
 # ==========================================
@@ -16,23 +17,27 @@ def load_config():
     # Assuming script is run from audit_tool/ or project_root/
     base_dir = Path(__file__).parent
     config_path = base_dir / "config" / "project_config.yaml"
-    
+
     if not config_path.exists():
         # Fallback for different run contexts
         config_path = Path("audit_tool/config/project_config.yaml")
-        
+
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-        
+
     load_dotenv()
-    if "db" not in cfg: cfg["db"] = {}
-    
+    if "db" not in cfg:
+        cfg["db"] = {}
+
     cfg["db"]["host"] = os.getenv("MYSQL_HOST", cfg["db"].get("host", "localhost"))
     cfg["db"]["port"] = int(os.getenv("MYSQL_PORT", cfg["db"].get("port", 3306)))
     cfg["db"]["user"] = os.getenv("MYSQL_USER", cfg["db"].get("user", "root"))
     cfg["db"]["password"] = os.getenv("MYSQL_PASSWORD", cfg["db"].get("password", ""))
-    cfg["db"]["database"] = os.getenv("MYSQL_DATABASE", cfg["db"].get("database", "code_audit_db"))
+    cfg["db"]["database"] = os.getenv(
+        "MYSQL_DATABASE", cfg["db"].get("database", "code_audit_db")
+    )
     return cfg
+
 
 DB_CFG = load_config()
 
@@ -61,8 +66,8 @@ SYSTEM_INSTRUCTIONS = (
     '- "get_high_risk_files": Returns a list of risky files. Takes no arguments.\n'
     '- "get_file_database_report": Returns API calls, flags, and defects for a specific file. Requires file_path.\n'
     '- "fetch_vue_block": Fetches raw source code of one block from a Vue file.\n'
-    '  Requires: file_path (str) and block_type (one of: script, template, style)\n'
-    '  IMPORTANT: Always call get_file_database_report FIRST. Never use this tool first.\n'
+    "  Requires: file_path (str) and block_type (one of: script, template, style)\n"
+    "  IMPORTANT: Always call get_file_database_report FIRST. Never use this tool first.\n"
     "\n"
     "HOW TO CALL A TOOL - STRICT FORMAT:\n"
     "Output ONLY a single raw JSON object on one line. No extra text. No markdown. No code fences.\n"
@@ -93,14 +98,16 @@ KNOWN_TOOLS = {"get_high_risk_files", "get_file_database_report", "fetch_vue_blo
 # ==========================================
 _session_cache = {}
 
+
 def clear_cache():
     global _session_cache
     _session_cache = {}
     print("[CACHE] Cleared")
 
+
 def execute_tool(tool_name: str, args: dict):
     cache_key = f"{tool_name}:{args.get('file_path', '')}"
-    
+
     if cache_key in _session_cache:
         print(f"[CACHE] Hit for {cache_key}")
         return _session_cache[cache_key]
@@ -120,7 +127,9 @@ def execute_tool(tool_name: str, args: dict):
             if matches:
                 exact_path = matches[0]
                 report = db_report_loader.load_all_issues_for_file(DB_CFG, exact_path)
-                report["_meta"] = f"Fuzzy match: resolved '{file_path}' -> '{exact_path}'"
+                report["_meta"] = (
+                    f"Fuzzy match: resolved '{file_path}' -> '{exact_path}'"
+                )
 
         if not report:
             result = {"error": f"File '{file_path}' not found in database."}
@@ -136,7 +145,9 @@ def execute_tool(tool_name: str, args: dict):
         if "ui_defects" in report:
             report["total_ui_defects_count"] = len(report["ui_defects"])
         if "accessibility_defects" in report:
-            report["total_accessibility_defects_count"] = len(report["accessibility_defects"])
+            report["total_accessibility_defects_count"] = len(
+                report["accessibility_defects"]
+            )
         # -----------------------------
 
         # Trim raw blobs that would blow the context window
@@ -148,40 +159,54 @@ def execute_tool(tool_name: str, args: dict):
 
         _session_cache[cache_key] = report
         return report
-    
+
     elif tool_name == "fetch_vue_block":
-        file_path  = args.get("file_path", "")
+        file_path = args.get("file_path", "")
         block_type = args.get("block_type", "script")
-        
+
         if block_type not in ("script", "template", "style"):
-            result = {"error": "block_type must be exactly one of: script, template, style"}
+            result = {
+                "error": "block_type must be exactly one of: script, template, style"
+            }
             _session_cache[cache_key] = result
             return result
-        
+
         # Fuzzy path resolution — same pattern as get_file_database_report
         if not db_report_loader.load_all_issues_for_file(DB_CFG, file_path):
             matches = db_report_loader.search_files(DB_CFG, file_path)
             if matches:
                 file_path = matches[0]
-        
+
         try:
             from task2_audit.extractors.vue_parser import parse_vue_file
-            parsed_result = parse_vue_file(file_path)
-        except Exception as e:
-            result = {"error": f"Could not parse file: {e}"}
+        except ImportError as e:
+            result = {
+                "error": (
+                    f"Cannot import vue_parser. "
+                    f"Check that 'task2_audit/extractors/vue_parser.py' exists. "
+                    f"Original error: {e}"
+                )
+            }
             _session_cache[cache_key] = result
             return result
-        
+
+        try:
+            parsed_result = parse_vue_file(file_path)
+        except Exception as e:
+            result = {"error": f"vue_parser failed on file '{file_path}': {e}"}
+            _session_cache[cache_key] = result
+            return result
+
         block_map = {
-            "script":    parsed_result.get("script_text",    "No script block found"),
+            "script": parsed_result.get("script_text", "No script block found"),
             "template": str(parsed_result.get("template_node", "No template found")),
-            "style":     parsed_result.get("style_text",     "No style block found"),
+            "style": parsed_result.get("style_text", "No style block found"),
         }
-        
+
         result = {
-            "file_path":  file_path,
+            "file_path": file_path,
             "block_type": block_type,
-            "content":    block_map[block_type]
+            "content": block_map[block_type],
         }
         _session_cache[cache_key] = result
         return result
@@ -192,152 +217,4 @@ def execute_tool(tool_name: str, args: dict):
 # Handles all real-world 3B model output patterns:
 #   - Compact:   {"name": ...}
 #   - Spaced:    { "name": ...}
-#   - Fenced:    ```json\n{"name": ...}\n```
-#   - Prefixed:  "Sure! {"name": ...}"
-# Returns the parsed dict ONLY if "name" is a known tool name.
-# Returns None for everything else — INCLUDING hallucinated answer JSON.
-# ==========================================
-def extract_tool_call(text: str):
-    # Strip markdown fences first
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    candidate = fenced.group(1) if fenced else None
-
-    if not candidate:
-        start = text.find("{")
-        if start == -1:
-            return None
-        depth, end = 0, -1
-        for i, ch in enumerate(text[start:], start):
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
-                    break
-        if end == -1:
-            return None
-        candidate = text[start:end]
-
-    try:
-        parsed = json.loads(candidate)
-        # Critical gate: only accept if it's a known tool — rejects hallucinated answer JSON
-        if isinstance(parsed, dict) and parsed.get("name") in KNOWN_TOOLS:
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    return None
-
-
-# ==========================================
-# 5. HALLUCINATION DETECTOR
-# If the model outputs JSON that is NOT a valid tool call, it has
-# hallucinated a fake answer. We intercept it and inject a correction.
-# ==========================================
-def looks_like_json(text: str) -> bool:
-    stripped = text.strip()
-    return stripped.startswith("{") or stripped.startswith("```")
-
-
-def build_correction_message(ai_text: str) -> str:
-    return (
-        "ERROR: You output a JSON object as your answer. This is not allowed.\n"
-        "You cannot know the contents of this codebase from memory.\n"
-        "You MUST call a tool to get real data. Do not repeat the previous JSON.\n"
-        "Output ONLY a valid tool call JSON now, nothing else.\n"
-        'Example: {"name": "get_file_database_report", "arguments": {"file_path": "RoleMgt.vue"}}'
-    )
-
-
-# ==========================================
-# 6. MAIN LOOP
-# ==========================================
-if __name__ == "__main__":
-    print("Initializing Code Audit Librarian...")
-
-    # Fail fast on DB issues so we know immediately if credentials are wrong
-    try:
-        db_report_loader.get_db_connection(DB_CFG).close()
-        print("[OK] Database connection verified.")
-    except Exception as e:
-        print(f"[FATAL] Cannot connect to database: {e}")
-        print("        Check DB_CFG credentials and confirm MySQL is running.")
-        sys.exit(1)
-
-    llm = ChatOllama(model="qwen2.5-coder:3b", temperature=0.0, num_ctx=8192)
-    system_msg = SystemMessage(content=SYSTEM_INSTRUCTIONS)
-    conversation_turns = []
-
-    print("Agent online. Type 'exit' to quit.\n")
-
-    while True:
-        user_input = input("\nYou: ").strip()
-        if not user_input:
-            continue
-        if user_input.lower() in ["exit", "quit"]:
-            print("Shutting down.")
-            break
-
-        conversation_turns.append(HumanMessage(content=user_input))
-
-        # Trim rolling window BEFORE invoking the model
-        if len(conversation_turns) > MAX_HISTORY_TURNS * 2:
-            conversation_turns = conversation_turns[-(MAX_HISTORY_TURNS * 2):]
-
-        # MAX_INNER_ITERATIONS includes headroom for 1 hallucination correction attempt
-        MAX_INNER_ITERATIONS = 6
-        inner_iterations = 0
-
-        while inner_iterations < MAX_INNER_ITERATIONS:
-            inner_iterations += 1
-
-            try:
-                full_history = [system_msg] + conversation_turns
-                response = llm.invoke(full_history)
-                ai_text = response.content.strip()
-            except Exception as e:
-                print(f"\n[LLM Error] Ollama call failed: {e}")
-                print("            Is Ollama running? Try: ollama serve")
-                break
-
-            # --- PATH A: Valid tool call ---
-            tool_call = extract_tool_call(ai_text)
-            if tool_call:
-                t_name = tool_call.get("name")
-                t_args = tool_call.get("arguments", {})
-                print(f"\n[DEBUG] Tool call -> {t_name}  args={t_args}")
-
-                conversation_turns.append(AIMessage(content=ai_text))
-
-                try:
-                    tool_data = execute_tool(t_name, t_args)
-                    print("[DEBUG] Tool returned data. Feeding back to agent...")
-                except Exception as e:
-                    tool_data = {"error": f"Tool execution failed: {e}"}
-                    print(f"[DEBUG] Tool error: {e}")
-
-                observation = (
-                    f"TOOL RESULT for '{t_name}':\n"
-                    f"{json.dumps(tool_data, indent=2, default=str)}\n\n"
-                    f"Now answer the user's request ('{user_input}') using ONLY the data above.\n"
-                    "If they asked for specific lines or exact code, provide it exactly. "
-                    "Do NOT output JSON."
-                )
-                conversation_turns.append(HumanMessage(content=observation))
-                continue  # Let model generate natural-language summary
-
-            # --- PATH B: Hallucinated JSON answer ---
-            if looks_like_json(ai_text):
-                print("\n[DEBUG] Hallucination detected: model output non-tool JSON. Forcing correction...")
-                conversation_turns.append(AIMessage(content=ai_text))
-                conversation_turns.append(HumanMessage(content=build_correction_message(ai_text)))
-                continue  # Give the model one chance to self-correct
-
-            # --- PATH C: Clean natural-language answer ---
-            print("\nLibrarian:\n", ai_text)
-            conversation_turns.append(AIMessage(content=ai_text))
-            break
-
-        else:
-            print("\n[Warning] Agent exceeded max iterations. Possible loop - resetting turn.")
+#   - Fenced:
