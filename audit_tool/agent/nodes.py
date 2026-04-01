@@ -1,12 +1,17 @@
 import re
 import json
+import os
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
-from prototype_agent import execute_tool
 from agent.state import GraphState
 
+# Added imports for Phase 2:
+from tools.db_tools import get_high_risk_files, get_file_report, get_summary_stats, get_critical_files, get_files_by_module, get_flag_summary
+from tools.code_tools import fetch_vue_block
+
 # Initialize the LLM and System Message locally
-llm = ChatOllama(model="qwen2.5-coder:3b", temperature=0.0, num_ctx=8192)
+MODEL_NAME = os.getenv("AGENT_MODEL", "qwen2.5-coder:3b")
+llm = ChatOllama(model=MODEL_NAME, temperature=0.0, num_ctx=8192)
 
 
 def router_node(state: GraphState) -> GraphState:
@@ -14,6 +19,7 @@ def router_node(state: GraphState) -> GraphState:
     print(f"\n{'=' * 50}")
     print(f"🕵️ [ROUTER] Analyzing user query: '{query}'")
 
+    # The dictionary insertion order guarantees the check order: verify -> summary -> file
     patterns = {
         "verify": [
             r"false positive",
@@ -23,18 +29,31 @@ def router_node(state: GraphState) -> GraphState:
             r"confirm",
         ],
         "summary": [
-            r"most (dangerous|risky|critical)",
-            r"which files",
-            r"overall.*(health|status)",
-            r"top \d+",
-            r"highest risk",
+            r"list", 
+            r"all files", 
+            r"overview", 
+            r"codebase",
+            r"dangerous", 
+            r"critical", 
+            r"high risk", 
+            r"worst",
+            r"most issues", 
+            r"should avoid", 
+            r"risky files",
+            r"which files", 
+            r"most dangerous", 
+            r"give me"
         ],
         "file": [
             r"\.vue\b",
-            r"how risky is",
-            r"tell me about",
-            r"what flags",
-            r"deep.?dive",
+            r"tell me about", 
+            r"what about", 
+            r"show me",
+            r"give me details on", 
+            r"explain", 
+            r"describe",
+            r"how is", 
+            r"how risky is"
         ],
     }
 
@@ -68,7 +87,7 @@ def aggregator_node(state: GraphState) -> GraphState:
     if "tool_results" not in state or state["tool_results"] is None:
         state["tool_results"] = []
 
-    res = execute_tool("get_high_risk_files", {})
+    res = get_high_risk_files.invoke({})
     labeled_result = f"DATABASE REPORT - THE FOLLOWING FILES ARE FLAGGED AS HIGH RISK/DANGEROUS:\n{res}"
     state["tool_results"].append(labeled_result)
     return state
@@ -80,15 +99,28 @@ def deep_dive_node(state: GraphState) -> GraphState:
         state["tool_results"] = []
 
     mf = state["matched_file"]
-    if not mf:
-        print("⏳ [DEEP DIVE] File name missing. Asking LLM to extract...")
-        prompt = f"Extract the .vue filename from this query. Output ONLY the filename. Query: {state['user_query']}"
-        res = llm.invoke([HumanMessage(content=prompt)])
-        mf = res.content.strip()
-        print(f"📄 [DEEP DIVE] LLM extracted: {mf}")
+    
+    # If matched_file is empty or missing the .vue extension
+    if not mf or not mf.lower().endswith(".vue"):
+        print("⏳ [DEEP DIVE] File name missing. Extracting search term from query...")
+        
+        query_lower = state["user_query"].lower()
+        stop_words = [
+            "tell", "me", "about", "what", "show", "give", 
+            "details", "on", "explain", "describe", "file", 
+            "the", "a", "an", "is", "how", "risky", "for", 
+            "of", "please", "can", "you"
+        ]
+        
+        # Extract words, filtering out the common stop words
+        words = re.findall(r'\b\w+\b', query_lower)
+        filtered_words = [w for w in words if w not in stop_words]
+        mf = " ".join(filtered_words)
+        
+        print(f"📄 [DEEP DIVE] Extracted search term: '{mf}'")
 
-    res_db = execute_tool("get_file_database_report", {"file_path": mf})
     state["matched_file"] = mf
+    res_db = get_file_report.invoke({"file_name": state["matched_file"]})
     state["tool_results"].append(str(res_db))
     return state
 
@@ -99,13 +131,22 @@ def validator_node(state: GraphState) -> GraphState:
     if "tool_results" not in state or state["tool_results"] is None:
         state["tool_results"] = []
 
-    print(f"   -> Executing get_file_database_report...")
-    res_db = execute_tool("get_file_database_report", {"file_path": mf})
+    print(f"   -> Executing get_file_report...")
+    res_db = get_file_report.invoke({"file_name": state["matched_file"]})
+
+    # --- NEW EXTRACTOR LOGIC ---
+    # Extract the full Windows absolute path from the get_file_report result
+    full_path = mf
+    try:
+        report_data = json.loads(res_db)
+        if "file" in report_data:
+            full_path = report_data["file"]
+    except json.JSONDecodeError:
+        pass
+    # ---------------------------
 
     print(f"   -> Executing fetch_vue_block (script)...")
-    res_code = execute_tool(
-        "fetch_vue_block", {"file_path": mf, "block_type": "script"}
-    )
+    res_code = fetch_vue_block.invoke({"file_path": full_path, "block": "script"})
 
     print(
         "⏳ [VALIDATOR] Tools finished. Asking LLM to verify data (This will take 10-20 seconds)..."

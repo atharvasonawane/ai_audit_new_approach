@@ -4,6 +4,7 @@ Description: A read-only database loader for Task 7. It fetches data from the un
              MySQL tables ensuring a decoupled logic layer for the Issue Detection Engine.
 """
 
+import os
 import logging
 import mysql.connector
 
@@ -13,15 +14,16 @@ def get_db_connection(cfg: dict):
     """
     Opens and returns a MySQL connection using the project configuration.
     Never hardcode host, user, password, or database.
+    Supports environment variable overrides.
     """
     db = cfg["db"]
     try:
         return mysql.connector.connect(
-            host     = db.get("host", "localhost"),
-            port     = int(db.get("port", 3306)),
-            user     = db["user"],
-            password = db["password"],
-            database = db["database"]
+            host     = os.getenv("MYSQL_HOST", db.get("host", "localhost")),
+            port     = int(os.getenv("MYSQL_PORT", db.get("port", 3306))),
+            user     = os.getenv("MYSQL_USER", db.get("user", "root")),
+            password = os.getenv("MYSQL_PASSWORD", db.get("password", "")),
+            database = os.getenv("MYSQL_DATABASE", db.get("database", "code_audit_db"))
         )
     except mysql.connector.Error as e:
         logger.error("[db_report_loader] Database connection failed: %s", e)
