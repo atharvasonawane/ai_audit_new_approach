@@ -43,20 +43,34 @@ def get_high_risk_files() -> str:
                 "ui_count": ui_count
             })
             
+    if not results:
+        return json.dumps({"message": "No files found matching the criteria"})
+            
     return json.dumps(results)
 
 @tool
 def get_file_report(file_name: str) -> str:
     """Use this tool when the developer asks about a specific Vue file by name. Use it to get risk level, flags, defects, and metrics for that file."""
+    best_match = None
+    best_filename_len = float('inf')
+
     for f in get_files():
-        if _match_file(f.get("file", ""), file_name):
-            return json.dumps({
-                "risk_level": f.get("risk_level"),
-                "module": f.get("module"),
-                "metrics": f.get("metrics", {}),
-                "issues": f.get("issues", []),
-                "severity_summary": f.get("severity_summary", {})
-            })
+        full_path = f.get("file", "")
+        if _match_file(full_path, file_name):
+            # Extract just the filename to find the shortest/most specific match
+            filename = full_path.replace("\\", "/").split("/")[-1]
+            if len(filename) < best_filename_len:
+                best_filename_len = len(filename)
+                best_match = f
+                
+    if best_match:
+        return json.dumps({
+            "risk_level": best_match.get("risk_level"),
+            "module": best_match.get("module"),
+            "metrics": best_match.get("metrics", {}),
+            "issues": best_match.get("issues", []),
+            "severity_summary": best_match.get("severity_summary", {})
+        })
             
     return json.dumps({"error": "File not found", "searched_for": file_name})
 
@@ -99,6 +113,9 @@ def get_critical_files() -> str:
                 "module": f.get("module"),
                 "flags": flags
             })
+            
+    if not results:
+        return json.dumps({"message": "No files found matching the criteria"})
             
     return json.dumps(results)
 

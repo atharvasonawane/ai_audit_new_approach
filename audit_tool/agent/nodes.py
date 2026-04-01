@@ -1,6 +1,5 @@
 import re
 import json
-import os
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from agent.state import GraphState
@@ -10,8 +9,7 @@ from tools.db_tools import get_high_risk_files, get_file_report, get_summary_sta
 from tools.code_tools import fetch_vue_block
 
 # Initialize the LLM and System Message locally
-MODEL_NAME = os.getenv("AGENT_MODEL", "qwen2.5-coder:3b")
-llm = ChatOllama(model=MODEL_NAME, temperature=0.0, num_ctx=8192)
+llm = ChatOllama(model="qwen2.5-coder:3b", temperature=0.0, num_ctx=8192)
 
 
 def router_node(state: GraphState) -> GraphState:
@@ -19,68 +17,53 @@ def router_node(state: GraphState) -> GraphState:
     print(f"\n{'=' * 50}")
     print(f"🕵️ [ROUTER] Analyzing user query: '{query}'")
 
-    # The dictionary insertion order guarantees the check order: verify -> summary -> file
-    patterns = {
-        "verify": [
-            r"false positive",
-            r"verify",
-            r"actually (have|contain)",
-            r"double.?check",
-            r"confirm",
-        ],
-        "summary": [
-            r"list", 
-            r"all files", 
-            r"overview", 
-            r"codebase",
-            r"dangerous", 
-            r"critical", 
-            r"high risk", 
-            r"worst",
-            r"most issues", 
-            r"should avoid", 
-            r"risky files",
-            r"which files", 
-            r"most dangerous", 
-            r"give me"
-        ],
-        "file": [
-            r"\.vue\b",
-            r"tell me about", 
-            r"what about", 
-            r"show me",
-            r"give me details on", 
-            r"explain", 
-            r"describe",
-            r"how is", 
-            r"how risky is"
-        ],
-    }
+    # 1. VERIFY CHECK (Highest Priority)
+    verify_patterns = ["false positive", "verify", "confirm", "are these real", "check if"]
+    if any(p in query for p in verify_patterns):
+        state["query_type"] = "verify"
+        match = re.search(r'[\w/\\]+\.vue', state["user_query"], re.IGNORECASE)
+        state["matched_file"] = match.group(0) if match else ""
+        return state
 
-    matched_type = "unknown"
-    for q_type, pats in patterns.items():
-        if any(re.search(p, query) for p in pats):
-            matched_type = q_type
-            break
+    # 2. FILE CHECK (.vue regex) - MOVED BEFORE SUMMARY
+    match = re.search(r'[\w/\\]+\.vue', state["user_query"], re.IGNORECASE)
+    if match:
+        state["query_type"] = "file"
+        state["matched_file"] = match.group(0)
+        return state
 
-    file_match = re.search(r"[\w/\\]+\.vue", state["user_query"], re.IGNORECASE)
-    state["matched_file"] = file_match.group(0) if file_match else ""
+    # 3. SUMMARY KEYWORDS (Includes new keywords for statistics)
+    summary_keywords = [
+        "list", "all files", "overview", "codebase", "dangerous", 
+        "critical", "high risk", "worst", "most issues", "which files", 
+        "most dangerous", "statistics", "static analysis"
+    ]
+    if any(k in query for k in summary_keywords):
+        state["query_type"] = "summary"
+        return state
 
-    if matched_type == "unknown":
-        print("⏳ [ROUTER] No regex match. Asking LLM to classify...")
-        prompt = f"Classify this query into one exact word: 'summary', 'file', 'verify', or 'unknown'. Query: {state['user_query']}"
-        res = llm.invoke([HumanMessage(content=prompt)])
-        clean_res = res.content.strip().lower()
-        if clean_res in ["summary", "file", "verify"]:
-            matched_type = clean_res
+    # 4. FILE PHRASE PATTERNS (Secondary safety net for files)
+    file_phrases = [
+        "tell me about", "what about", "show me", "explain", 
+        "describe", "how is", "how risky is", 
+        "looking at", "full report for", "report for"
+    ]
+    if any(p in query for p in file_phrases):
+        state["query_type"] = "file"
+        return state
 
-    print(f"🎯 [ROUTER] Decided Route: {matched_type.upper()}")
-    if state["matched_file"]:
-        print(f"📄 [ROUTER] Extracted File: {state['matched_file']}")
-
+    # 5. LLM FALLBACK 
+    state["matched_file"] = ""
+    print("⏳ [ROUTER] No regex match. Asking LLM to classify...")
+    prompt = f"Classify this query into one exact word: 'summary', 'file', 'verify', or 'unknown'. Query: {state['user_query']}"
+    res = llm.invoke([HumanMessage(content=prompt)])
+    clean_res = res.content.strip().lower()
+    
+    matched_type = clean_res if clean_res in ["summary", "file", "verify"] else "unknown"
     state["query_type"] = matched_type
+    
+    print(f"🎯 [ROUTER] Decided Route: {matched_type.upper()}")
     return state
-
 
 def aggregator_node(state: GraphState) -> GraphState:
     print("\n⚙️ [AGGREGATOR] Fetching high risk files...")
@@ -94,34 +77,41 @@ def aggregator_node(state: GraphState) -> GraphState:
 
 
 def deep_dive_node(state: GraphState) -> GraphState:
-    print(f"\n⚙️ [DEEP DIVE] Fetching DB report for {state['matched_file']}...")
+    print(f"\n⚙️ [DEEP DIVE] Fetching DB report for {state.get('matched_file', '')}...")
     if "tool_results" not in state or state["tool_results"] is None:
         state["tool_results"] = []
 
-    mf = state["matched_file"]
+    matched_file = state.get("matched_file", "")
+    query = state.get("user_query", "").lower()
     
-    # If matched_file is empty or missing the .vue extension
-    if not mf or not mf.lower().endswith(".vue"):
-        print("⏳ [DEEP DIVE] File name missing. Extracting search term from query...")
+    stopwords = [
+        "tell", "me", "about", "what", "show", "give", "details", "on", 
+        "explain", "describe", "file", "the", "a", "an", "is", "how", 
+        "risky", "for", "of", "please", "can", "you"
+    ]
+    generic_words = {"login", "stuff", "page", "component", "file"}
+    
+    search_term = matched_file
+    
+    if not search_term:
+        clean_query = query.replace("?", "").replace(".", "").replace(",", "")
+        words = clean_query.split()
+        remaining_words = [w for w in words if w not in stopwords]
+        search_term = " ".join(remaining_words).strip()
+        print(f"📄 [DEEP DIVE] Extracted search term: '{search_term}'")
         
-        query_lower = state["user_query"].lower()
-        stop_words = [
-            "tell", "me", "about", "what", "show", "give", 
-            "details", "on", "explain", "describe", "file", 
-            "the", "a", "an", "is", "how", "risky", "for", 
-            "of", "please", "can", "you"
-        ]
+    has_vue = ".vue" in search_term.lower()
+    is_long_enough = len(search_term) > 4
+    is_not_generic = search_term not in generic_words
+    
+    if has_vue or (is_long_enough and is_not_generic):
+        state["matched_file"] = search_term
+        res_db = get_file_report.invoke({"file_name": search_term})
+        state["tool_results"].append(str(res_db))
+    else:
+        state["tool_results"].append('{"error": "Ambiguous file query"}')
+        state["final_answer"] = "Please specify the exact .vue filename you are asking about."
         
-        # Extract words, filtering out the common stop words
-        words = re.findall(r'\b\w+\b', query_lower)
-        filtered_words = [w for w in words if w not in stop_words]
-        mf = " ".join(filtered_words)
-        
-        print(f"📄 [DEEP DIVE] Extracted search term: '{mf}'")
-
-    state["matched_file"] = mf
-    res_db = get_file_report.invoke({"file_name": state["matched_file"]})
-    state["tool_results"].append(str(res_db))
     return state
 
 
