@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 # Resolve the path to task7/issue_report.json relative to this file's location
@@ -14,11 +15,24 @@ def _load_report():
     except json.JSONDecodeError as e:
         raise ValueError(f"Failed to parse issue report. Malformed JSON: {e}")
 
-# Load at import time so disk is only read once per session
-_report = _load_report()
+def clear_cache():
+    # Stub to prevent NameError, as session cache is handled at the agent level
+    pass
+
+_report = None
+_report_mtime = None
 
 def get_report():
+    global _report, _report_mtime
+    
+    current_mtime = os.path.getmtime(REPORT_PATH)
+    if _report_mtime != current_mtime:
+        _report = _load_report()
+        _report_mtime = current_mtime
+        print("[REPORT] Detected change — reloaded from disk.")
+        clear_cache()
+        
     return _report
 
 def get_files():
-    return _report.get("files", [])
+    return get_report().get("files", [])

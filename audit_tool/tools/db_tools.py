@@ -65,6 +65,7 @@ def get_file_report(file_name: str) -> str:
                 
     if best_match:
         return json.dumps({
+            "file": best_match.get("file"),  # <--- ADD THIS LINE HERE
             "risk_level": best_match.get("risk_level"),
             "module": best_match.get("module"),
             "metrics": best_match.get("metrics", {}),

@@ -1,20 +1,30 @@
 import os
+import re
 from langchain_core.tools import tool
-from task2_audit.extractors.vue_parser import parse_vue_file
 
 @tool
 def fetch_vue_block(file_path: str, block: str) -> str:
-    """Use this tool to read the actual source code of a Vue file. Only call this tool AFTER get_file_report has already confirmed the file exists in the report. Never call this as the first tool."""
+    """
+    Reads the actual source code of a Vue file from the local disk.
+    Args:
+        file_path: The absolute Windows path to the .vue file.
+        block: One of 'script', 'template', or 'style'.
+    """
     if not os.path.exists(file_path):
         return f"Error: File not found at path: {file_path}"
         
     try:
-        parsed_data = parse_vue_file(file_path)
+        with open(file_path, "r", encoding="utf-8") as f:
+            raw_text = f.read()
+            
+        # Regex to find the requested block while ignoring case and capturing everything inside
+        pattern = re.compile(rf"<{block}[^>]*>(.*?)</{block}>", re.DOTALL | re.IGNORECASE)
+        match = pattern.search(raw_text)
+        
+        if match:
+            return match.group(1).strip()
+        else:
+            return f"Error: Block '{block}' not found in the source code of this file."
+            
     except Exception as e:
-        return f"Error parsing file: {e}"
-        
-    content = parsed_data.get(block)
-    if not content:
-        return f"Error: Block '{block}' not found in file."
-        
-    return str(content)
+        return f"Error reading file: {e}"

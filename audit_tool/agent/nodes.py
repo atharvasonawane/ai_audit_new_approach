@@ -25,14 +25,27 @@ def router_node(state: GraphState) -> GraphState:
         state["matched_file"] = match.group(0) if match else ""
         return state
 
-    # 2. FILE CHECK (.vue regex) - MOVED BEFORE SUMMARY
+    # 2. CODE VIEW CHECK (Must run before general file check)
+    code_view_patterns = [
+        r"show me.*(script|template|style)",
+        r"(script|template|style) block",
+        r"source code",
+        r"read.*\.vue"
+    ]
+    if any(re.search(p, query) for p in code_view_patterns):
+        state["query_type"] = "code_view"
+        match = re.search(r'[\w/\\]+\.vue', state["user_query"], re.IGNORECASE)
+        state["matched_file"] = match.group(0) if match else ""
+        return state
+
+    # 3. FILE CHECK (.vue regex)
     match = re.search(r'[\w/\\]+\.vue', state["user_query"], re.IGNORECASE)
     if match:
         state["query_type"] = "file"
         state["matched_file"] = match.group(0)
         return state
 
-    # 3. SUMMARY KEYWORDS (Includes new keywords for statistics)
+    # 4. SUMMARY KEYWORDS
     summary_keywords = [
         "list", "all files", "overview", "codebase", "dangerous", 
         "critical", "high risk", "worst", "most issues", "which files", 
@@ -42,7 +55,7 @@ def router_node(state: GraphState) -> GraphState:
         state["query_type"] = "summary"
         return state
 
-    # 4. FILE PHRASE PATTERNS (Secondary safety net for files)
+    # 5. FILE PHRASE PATTERNS
     file_phrases = [
         "tell me about", "what about", "show me", "explain", 
         "describe", "how is", "how risky is", 
@@ -52,14 +65,14 @@ def router_node(state: GraphState) -> GraphState:
         state["query_type"] = "file"
         return state
 
-    # 5. LLM FALLBACK 
+    # 6. LLM FALLBACK 
     state["matched_file"] = ""
     print("⏳ [ROUTER] No regex match. Asking LLM to classify...")
     prompt = f"Classify this query into one exact word: 'summary', 'file', 'verify', or 'unknown'. Query: {state['user_query']}"
     res = llm.invoke([HumanMessage(content=prompt)])
     clean_res = res.content.strip().lower()
     
-    matched_type = clean_res if clean_res in ["summary", "file", "verify"] else "unknown"
+    matched_type = clean_res if clean_res in ["summary", "file", "verify", "code_view"] else "unknown"
     state["query_type"] = matched_type
     
     print(f"🎯 [ROUTER] Decided Route: {matched_type.upper()}")
@@ -115,6 +128,39 @@ def deep_dive_node(state: GraphState) -> GraphState:
     return state
 
 
+def code_view_node(state: GraphState) -> GraphState:
+    mf = state.get("matched_file", "")
+    print(f"\n⚙️ [CODE VIEW] Preparing source extraction for {mf}...")
+    if "tool_results" not in state or state["tool_results"] is None:
+        state["tool_results"] = []
+
+    # Step 1: Get the absolute path from the DB report
+    # This is critical because fetch_vue_block needs the real disk location [cite: 140, 159]
+    res_db = get_file_report.invoke({"file_name": mf})
+    full_path = mf
+    try:
+        report_data = json.loads(res_db)
+        full_path = report_data.get("file", mf)
+    except:
+        pass
+
+    # Step 2: Determine which block the user wants
+    query = state.get("user_query", "").lower()
+    block_type = "script" # Default
+    if "template" in query:
+        block_type = "template"
+    elif "style" in query:
+        block_type = "style"
+
+    # Step 3: Fetch the raw code
+    print(f"   -> Executing fetch_vue_block for {block_type}...")
+    res_code = fetch_vue_block.invoke({"file_path": full_path, "block": block_type})
+    
+    # Store the result for the synthesizer [cite: 180, 243]
+    state["tool_results"].append(f"SOURCE CODE ({block_type.upper()} BLOCK):\n{res_code}")
+    return state
+
+
 def validator_node(state: GraphState) -> GraphState:
     mf = state["matched_file"]
     print(f"\n⚙️ [VALIDATOR] Starting verification for {mf}...")
@@ -125,7 +171,6 @@ def validator_node(state: GraphState) -> GraphState:
     res_db = get_file_report.invoke({"file_name": state["matched_file"]})
 
     # --- NEW EXTRACTOR LOGIC ---
-    # Extract the full Windows absolute path from the get_file_report result
     full_path = mf
     try:
         report_data = json.loads(res_db)
@@ -142,53 +187,76 @@ def validator_node(state: GraphState) -> GraphState:
         "⏳ [VALIDATOR] Tools finished. Asking LLM to verify data (This will take 10-20 seconds)..."
     )
     verify_prompt = (
-        f"Analyze this DB report and Source Code.\n"
         f'Return ONLY JSON: {{"verified": bool, "false_positive": bool, "active_count": int, "fp_count": int, "evidence_lines": [int], "confidence": float}}\n\n'
         f"DB: {res_db}\nCode: {res_code}"
     )
 
-    res = llm.invoke([HumanMessage(content=verify_prompt)])
+    messages = [HumanMessage(content=verify_prompt)]
+    res = llm.invoke(messages)
+
+    def extract_json(content: str):
+        clean_json = re.sub(r"```json\s*|\s*```", "", content.strip())
+        return json.loads(clean_json)
 
     try:
-        clean_json = re.sub(r"```json\s*|\s*```", "", res.content.strip())
-        verification = json.loads(clean_json)
+        verification = extract_json(res.content)
         state["verified"] = True
         state["tool_results"].append(
             f"VERIFICATION RESULT:\n{json.dumps(verification, indent=2)}"
         )
         print("✅ [VALIDATOR] LLM successfully output structured JSON.")
+        
     except json.JSONDecodeError:
-        state["verified"] = False
-        print("⚠️ [VALIDATOR] LLM failed to output valid JSON.")
+        print("⚠️ [VALIDATOR] LLM output prose instead of JSON. Sending correction message...")
+        messages.append(res)
+        messages.append(HumanMessage(content=(
+            "You failed to return valid JSON. You MUST return strictly a JSON object "
+            "matching the requested schema. Do not include prose, explanations, or markdown formatting."
+        )))
+        
+        res_retry = llm.invoke(messages)
+        try:
+            verification = extract_json(res_retry.content)
+            state["verified"] = True
+            state["tool_results"].append(
+                f"VERIFICATION RESULT:\n{json.dumps(verification, indent=2)}"
+            )
+            print("✅ [VALIDATOR] LLM successfully output structured JSON on retry.")
+        except json.JSONDecodeError:
+            state["verified"] = False
+            state["tool_results"].append(
+                "VERIFICATION FAILED: Validator returned prose instead of strict JSON. Could not verify false positives."
+            )
+            print("❌ [VALIDATOR] LLM failed to output valid JSON after retry. Verification skipped.")
 
     state["tool_results"].extend([str(res_db), str(res_code)])
     return state
 
 
 def synthesizer_node(state: GraphState) -> GraphState:
-    print(
-        "\n✍️ [SYNTHESIZER] Generating final English response (This will take 10-20 seconds)..."
-    )
+    print("\n✍️ [SYNTHESIZER] Analyzing context and generating response...")
     results = state.get("tool_results", [])
     ctx = "\n\n---\n\n".join(results)
 
+    # This prompt is designed to work with 3B (short extractions) 
+    # and 27B (full file analysis) [cite: 308, 333]
     clean_sys_msg = SystemMessage(
         content=(
-            "You are the Code Audit Librarian. "
-            "Your ONLY job is to synthesize the provided TOOL CONTEXT into a helpful, "
-            "plain-English answer for the user. Do not try to call tools or ask the user "
-            "to run tools. The data has already been fetched for you."
+            "You are the Code Audit Librarian. Your job is to answer the user's "
+            "question using ONLY the provided TOOL CONTEXT. [cite: 181, 290]"
+            "\n- If the user asks for code, provide the relevant snippets in markdown blocks."
+            "\n- If the requested code is very long, focus on the most important logic."
+            "\n- Do not use outside knowledge or hallucinate code. [cite: 186, 290]"
         )
     )
 
     prompt = (
         f"TOOL CONTEXT:\n{ctx}\n\n"
         f"USER QUERY: {state['user_query']}\n\n"
-        f"Provide a clear, plain-English summary addressing the query using ONLY the context above."
+        "Please provide the specific information requested."
     )
 
     res = llm.invoke([clean_sys_msg, HumanMessage(content=prompt)])
     state["final_answer"] = res.content
-    print("✨ [SYNTHESIZER] Response generated!")
-    print(f"{'=' * 50}\n")
+    print("✨ [SYNTHESIZER] Answer ready.")
     return state
