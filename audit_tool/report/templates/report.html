@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Code Audit Librarian — Comprehensive PortalManagement Code Health Report">
+    <title>Code Audit Report — PortalManagement</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+
+<body>
+    <div class="dashboard">
+
+        <!-- ===== HEADER ===== -->
+        <header class="header">
+            <div class="header-info">
+                <h1>Code Audit Librarian — <span>PortalManagement</span></h1>
+                <div class="scan-date">Report generated on {{ scan_date }}</div>
+            </div>
+            <div class="health-gauge" id="healthGauge">
+                {% set circumference = 2 * 3.14159 * 58 %}
+                {% set offset = circumference - (circumference * project_score / 100) %}
+                {% if project_score >= 80 %}{% set gauge_color = '#3fb950' %}
+                {% elif project_score >= 50 %}{% set gauge_color = '#d29922' %}
+                {% else %}{% set gauge_color = '#f85149' %}{% endif %}
+                <svg viewBox="0 0 140 140">
+                    <circle class="gauge-bg" cx="70" cy="70" r="58"></circle>
+                    <circle class="gauge-fill" cx="70" cy="70" r="58" stroke="{{ gauge_color }}"
+                        stroke-dasharray="{{ circumference }}" stroke-dashoffset="{{ offset }}"
+                        style="filter: drop-shadow(0 0 6px {{ gauge_color }}40);"></circle>
+                </svg>
+                <div class="gauge-label">
+                    <div class="gauge-score" style="color: {{ gauge_color }}">{{ project_score }}</div>
+                    <div class="gauge-text">Health Score</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- ===== SUMMARY CARDS ===== -->
+        <div class="summary-cards">
+            <div class="summary-card">
+                <div class="card-icon">📁</div>
+                <div class="card-value">{{ summary.total_files_scanned }}</div>
+                <div class="card-label">Files Scanned</div>
+            </div>
+            <div class="summary-card critical">
+                <div class="card-icon">🔴</div>
+                <div class="card-value">{{ summary.critical_files }}</div>
+                <div class="card-label">Critical Files</div>
+            </div>
+            <div class="summary-card issues">
+                <div class="card-icon">🐛</div>
+                <div class="card-value">{{ category_counts.total }}</div>
+                <div class="card-label">Total Defects</div>
+            </div>
+            <div class="summary-card score">
+                <div class="card-icon">💯</div>
+                <div class="card-value">{{ project_score }}<small
+                        style="font-size:0.5em;color:var(--text-secondary)">/100</small></div>
+                <div class="card-label">Health Score</div>
+            </div>
+        </div>
+
+        <!-- ===== CHARTS ===== -->
+        <div class="charts-row">
+            <div class="chart-card">
+                <h3>📊 Risk Distribution</h3>
+                <div class="chart-container">
+                    <canvas id="riskChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>📋 Defect Category Breakdown</h3>
+                <div class="chart-container">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== NAV TABS ===== -->
+        <nav class="section-nav" id="sectionNav">
+            <button class="nav-tab active" onclick="showSection('all')">📋 All Sections</button>
+            <button class="nav-tab" onclick="showSection('complexity')">🚩 Complexity <span class="tab-count">{{
+                    category_counts.flags }}</span></button>
+            <button class="nav-tab" onclick="showSection('spelling')">📝 Spelling <span class="tab-count">{{
+                    category_counts.spelling }}</span></button>
+            <button class="nav-tab" onclick="showSection('css')">🎨 CSS <span class="tab-count">{{ category_counts.css
+                    }}</span></button>
+            <button class="nav-tab" onclick="showSection('placeholder')">🚧 Placeholder <span class="tab-count">{{
+                    category_counts.placeholder }}</span></button>
+            <button class="nav-tab" onclick="showSection('a11y')">♿ Accessibility <span class="tab-count">{{
+                    category_counts.a11y }}</span></button>
+            <button class="nav-tab" onclick="showSection('filetable')">📄 File Table</button>
+        </nav>
+
+        <!-- =============================================================== -->
+        <!-- SECTION 1: COMPLEXITY FLAGS (Task 3)                            -->
+        <!-- =============================================================== -->
+        <div class="defect-section" id="section-complexity" data-section="complexity">
+            <div class="section-header">
+                <h2>🚩 Complexity Flags</h2>
+                <span class="section-count">{{ complexity_flags|length }} flags from {{
+                    complexity_flags|map(attribute='basename')|unique|list|length }} files</span>
+                <span class="section-source">Source: Task 3 — component_complexity.json</span>
+            </div>
+
+            {% if complexity_flags|length > 0 %}
+            <div class="defect-table-wrap">
+                <table class="defect-table">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Flag</th>
+                            <th>Severity</th>
+                            <th>AI Suggestion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for defect in complexity_flags %}
+                        <tr>
+                            <td><strong>{{ defect.basename }}</strong></td>
+                            <td><span class="badge badge-flag">{{ defect.name }}</span></td>
+                            <td>
+                                {% set sev = defect.severity|upper %}
+                                <span
+                                    class="badge badge-{{ 'critical' if sev=='CRITICAL' else 'high' if sev=='HIGH' else 'medium' if sev=='MEDIUM' else 'low' }}">{{
+                                    sev }}</span>
+                            </td>
+                            <td class="ai-cell">
+                                {% if defect.ai %}
+                                <div class="ai-inline">
+                                    <span class="ai-tag">🤖</span>
+                                    <span class="ai-text-inline">{{ defect.ai.suggestion }}</span>
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">✅ No complexity flags detected</div>
+            {% endif %}
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- SECTION 2: SPELLING DEFECTS (Task 5)                            -->
+        <!-- =============================================================== -->
+        <div class="defect-section" id="section-spelling" data-section="spelling">
+            <div class="section-header">
+                <h2>📝 Spelling Defects — AI False Positive Analysis</h2>
+                <span class="section-count">{{ spelling_defects|length }} defects</span>
+                <span class="section-source">Source: Task 5 — ui_consistency_report.json</span>
+            </div>
+
+            {% if spelling_defects|length > 0 %}
+            <div class="defect-table-wrap">
+                <table class="defect-table">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Flagged Text</th>
+                            <th>Spell-Check Suggestion</th>
+                            <th>AI Verdict</th>
+                            <th>AI Explanation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for defect in spelling_defects %}
+                        <tr>
+                            <td><strong>{{ defect.basename }}</strong></td>
+                            <td><span class="trigger-text">{{ defect.trigger_text }}</span></td>
+                            <td><span class="expected-text">{{ defect.expected_text or '—' }}</span></td>
+                            <td>
+                                {% if defect.ai and defect.ai.is_false_positive is defined %}
+                                {% if defect.ai.is_false_positive %}
+                                <span class="fp-indicator fp-true">✅ False Positive</span>
+                                {% else %}
+                                <span class="fp-indicator fp-false">❌ Real Issue</span>
+                                {% endif %}
+                                {% else %}
+                                <span style="color:var(--text-muted)">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="ai-cell">
+                                {% if defect.ai %}
+                                <div class="ai-inline">
+                                    <span class="ai-tag">🤖</span>
+                                    <span class="ai-text-inline">{{ defect.ai.suggestion }}</span>
+                                    {% if defect.ai.confidence is defined and defect.ai.confidence > 0 %}
+                                    <span class="confidence-bar"><span class="fill"
+                                            style="width:{{ (defect.ai.confidence * 100)|int }}%; background:{% if defect.ai.confidence >= 0.8 %}var(--severity-clean){% elif defect.ai.confidence >= 0.5 %}var(--severity-medium){% else %}var(--severity-critical){% endif %}"></span></span>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">✅ No spelling defects detected</div>
+            {% endif %}
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- SECTION 3: CSS INCONSISTENCIES (Task 5)                         -->
+        <!-- =============================================================== -->
+        <div class="defect-section" id="section-css" data-section="css">
+            <div class="section-header">
+                <h2>🎨 CSS Inconsistencies</h2>
+                <span class="section-count">{{ css_defects|length }} defects</span>
+                <span class="section-source">Source: Task 5 — ui_consistency_report.json</span>
+            </div>
+
+            {% if css_defects|length > 0 %}
+            <div class="defect-table-wrap">
+                <table class="defect-table">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Element</th>
+                            <th>Current CSS</th>
+                            <th>Expected CSS</th>
+                            <th>Severity</th>
+                            <th>AI Fix Suggestion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for defect in css_defects %}
+                        <tr>
+                            <td><strong>{{ defect.basename }}</strong></td>
+                            <td>{{ defect.element_type }}</td>
+                            <td><code class="trigger-text">{{ defect.trigger_text }}</code></td>
+                            <td><code class="expected-text">{{ defect.expected_text }}</code></td>
+                            <td><span class="badge badge-medium">{{ defect.severity }}</span></td>
+                            <td class="ai-cell">
+                                {% if defect.ai %}
+                                <div class="ai-inline">
+                                    <span class="ai-tag">🤖</span>
+                                    <span class="ai-text-inline">{{ defect.ai.suggestion }}</span>
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">✅ No CSS inconsistencies detected</div>
+            {% endif %}
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- SECTION 4: PLACEHOLDER TEXT IN PRODUCTION (Task 5)              -->
+        <!-- =============================================================== -->
+        <div class="defect-section" id="section-placeholder" data-section="placeholder">
+            <div class="section-header">
+                <h2>🚧 Placeholder Text in Production</h2>
+                <span class="section-count">{{ placeholder_defects|length }} defects</span>
+                <span class="section-source">Source: Task 5 — ui_consistency_report.json</span>
+            </div>
+
+            {% if placeholder_defects|length > 0 %}
+            <div class="defect-table-wrap">
+                <table class="defect-table">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Severity</th>
+                            <th>Placeholder Text (truncated)</th>
+                            <th>AI Suggestion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for defect in placeholder_defects %}
+                        <tr>
+                            <td><strong>{{ defect.basename }}</strong></td>
+                            <td><span class="badge badge-medium">{{ defect.severity }}</span></td>
+                            <td class="placeholder-cell"><code
+                                    class="trigger-text">{{ defect.trigger_text[:150] }}{% if defect.trigger_text|length > 150 %}...{% endif %}</code>
+                            </td>
+                            <td class="ai-cell">
+                                {% if defect.ai %}
+                                <div class="ai-inline">
+                                    <span class="ai-tag">🤖</span>
+                                    <span class="ai-text-inline">{{ defect.ai.suggestion }}</span>
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">✅ No placeholder text detected</div>
+            {% endif %}
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- SECTION 5: ACCESSIBILITY DEFECTS (Task 6)                       -->
+        <!-- =============================================================== -->
+        <div class="defect-section" id="section-a11y" data-section="a11y">
+            <div class="section-header">
+                <h2>♿ Accessibility Defects</h2>
+                <span class="section-count">{{ a11y_defects|length }} defects</span>
+                <span class="section-source">Source: Task 6 — accessibility_report.json</span>
+            </div>
+
+            {% if a11y_defects|length > 0 %}
+            <div class="defect-table-wrap">
+                <table class="defect-table">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Defect</th>
+                            <th>Rule</th>
+                            <th>Element</th>
+                            <th>Line</th>
+                            <th>Severity</th>
+                            <th>AI Fix</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for defect in a11y_defects %}
+                        <tr>
+                            <td><strong>{{ defect.basename }}</strong></td>
+                            <td><span class="badge badge-a11y">{{ defect.defect_type }}</span></td>
+                            <td style="font-size:0.78rem; color:var(--text-secondary)">{{ defect.rule }}</td>
+                            <td><code
+                                    style="color:var(--accent-blue); font-size:0.8rem">{{ defect.element[:60] }}{% if defect.element|length > 60 %}...{% endif %}</code>
+                            </td>
+                            <td class="num-cell">{{ defect.line_number }}</td>
+                            <td>
+                                {% set sev = defect.severity|upper %}
+                                <span
+                                    class="badge badge-{{ 'critical' if sev=='CRITICAL' else 'high' if sev=='HIGH' else 'medium' if sev=='MEDIUM' else 'low' }}">{{
+                                    sev }}</span>
+                            </td>
+                            <td class="ai-cell">
+                                {% if defect.ai %}
+                                <div class="ai-inline">
+                                    <span class="ai-tag">🤖</span>
+                                    <span class="ai-text-inline">{{ defect.ai.suggestion[:200] }}{% if
+                                        defect.ai.suggestion|length > 200 %}...{% endif %}</span>
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">✅ No accessibility defects detected</div>
+            {% endif %}
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- SECTION 6: FILE ANALYSIS TABLE (Task 7)                         -->
+        <!-- =============================================================== -->
+        <div class="defect-section" id="section-filetable" data-section="filetable">
+            <div class="section-header">
+                <h2>📄 File-Level Analysis</h2>
+                <span class="section-count">{{ files|length }} files with issues</span>
+                <span class="section-source">Source: Task 7 — issue_report.json</span>
+            </div>
+
+            <div class="table-controls">
+                <input type="text" id="fileSearch" placeholder="🔍 Search files..." oninput="filterTable()">
+                <select id="riskFilter" onchange="filterTable()">
+                    <option value="">All Risk Levels</option>
+                    <option value="CRITICAL">🔴 Critical</option>
+                    <option value="HIGH">🟠 High</option>
+                    <option value="MEDIUM">🟡 Medium</option>
+                    <option value="LOW">🔵 Low</option>
+                </select>
+            </div>
+
+            <div class="file-table-wrap">
+                <table class="file-table" id="fileTable">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable(0)">File <span class="sort-icon">⇅</span></th>
+                            <th onclick="sortTable(1)">Risk <span class="sort-icon">⇅</span></th>
+                            <th onclick="sortTable(2)">Score <span class="sort-icon">⇅</span></th>
+                            <th onclick="sortTable(3)">Lines <span class="sort-icon">⇅</span></th>
+                            <th onclick="sortTable(4)">Methods <span class="sort-icon">⇅</span></th>
+                            <th onclick="sortTable(5)">Flags <span class="sort-icon">⇅</span></th>
+                            <th onclick="sortTable(6)">A11Y <span class="sort-icon">⇅</span></th>
+                            <th onclick="sortTable(7)">UI <span class="sort-icon">⇅</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for file in files %}
+                        {% set risk = file.risk_level|upper %}
+                        {% set risk_class = 'critical' if risk == 'CRITICAL' else 'high' if risk == 'HIGH' else 'medium'
+                        if risk == 'MEDIUM' else 'low' if risk == 'LOW' else 'clean' %}
+                        <tr class="file-row" data-risk="{{ risk }}" data-name="{{ file.basename|lower }}"
+                            onclick="toggleDetail('detail-{{ loop.index }}', this)">
+                            <td><strong>{{ file.basename }}</strong></td>
+                            <td><span class="badge badge-{{ risk_class }}">{{ risk }}</span></td>
+                            <td
+                                class="score-cell {% if file.score >= 80 %}score-good{% elif file.score >= 50 %}score-ok{% else %}score-bad{% endif %}">
+                                {{ file.score }}</td>
+                            <td class="num-cell">{{ file.metrics.lines }}</td>
+                            <td class="num-cell">{{ file.metrics.methods }}</td>
+                            <td class="num-cell">{{ file.flag_count }}</td>
+                            <td class="num-cell">{{ file.a11y_count }}</td>
+                            <td class="num-cell">{{ file.ui_count }}</td>
+                        </tr>
+                        <tr class="issue-detail-row" id="detail-{{ loop.index }}">
+                            <td colspan="8">
+                                <div class="issue-detail-content">
+                                    <ul class="issue-list">
+                                        {% for issue in file.issues %}
+                                        {% set sug = file.suggestions[loop.index0] if file.suggestions|length >
+                                        loop.index0 else {} %}
+                                        <li class="issue-item">
+                                            <span class="issue-icon">{% if issue.type == 'FLAG' %}🚩{% elif issue.type
+                                                == 'A11Y_DEFECT' %}♿{% else %}🎨{% endif %}</span>
+                                            <div class="issue-body">
+                                                <div class="issue-title">
+                                                    <span
+                                                        class="badge badge-{{ 'flag' if issue.type == 'FLAG' else 'a11y' if issue.type == 'A11Y_DEFECT' else 'ui' }}">{{
+                                                        issue.type|replace('_', ' ') }}</span>
+                                                </div>
+                                                <div class="issue-desc">
+                                                    {% if issue.type == 'FLAG' %}{{ issue.name }} <span
+                                                        style="color:var(--text-muted)">({{ issue.category }})</span>
+                                                    {% elif issue.type == 'A11Y_DEFECT' %}{{ issue.defect_type }} at
+                                                    line {{ issue.line_number }}: <code
+                                                        style="color:var(--accent-blue)">{{ issue.element }}</code>
+                                                    {% elif issue.type == 'UI_DEFECT' %}{{ issue.defect_type }}: {% if
+                                                    issue.snippet %}<code
+                                                        class="trigger-text">{{ issue.snippet }}</code>{% endif %}{% if
+                                                    issue.trigger_text and issue.trigger_text != issue.snippet %}<code
+                                                        class="trigger-text">{{ issue.trigger_text }}</code>{% endif
+                                                    %}{% if issue.expected_text %} → <span class="expected-text">{{
+                                                        issue.expected_text }}</span>{% endif %}
+                                                    {% endif %}
+                                                </div>
+                                                {% if sug and sug.suggestion %}
+                                                <div class="ai-suggestion">
+                                                    <div class="ai-header">🤖 AI Analysis
+                                                        {% if sug.is_false_positive is defined %}
+                                                        <span
+                                                            class="fp-indicator {% if sug.is_false_positive %}fp-true{% else %}fp-false{% endif %}">{%
+                                                            if sug.is_false_positive %}✅ False Positive{% else %}❌ Real
+                                                            Issue{% endif %}</span>
+                                                        {% endif %}
+                                                    </div>
+                                                    <div class="ai-text">{{ sug.suggestion }}</div>
+                                                </div>
+                                                {% endif %}
+                                            </div>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ===== FOOTER ===== -->
+    <footer class="footer">
+        Generated on {{ scan_date }} · Code Audit Librarian — <a href="#">PortalManagement</a> · Powered by Ollama +
+        qwen2.5-coder:3b
+    </footer>
+
+    <script>
+        // ===== CHARTS =====
+        const riskCtx = document.getElementById('riskChart').getContext('2d');
+        new Chart(riskCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Critical', 'High', 'Medium', 'Low', 'Clean'],
+                datasets: [{
+                    data: [{{ summary.critical_files }}, {{ summary.high_files }}, {{ summary.medium_files }}, {{ summary.low_files }}, {{ summary.clean_files }}],
+            backgroundColor: ['#f85149', '#f0883e', '#d29922', '#58a6ff', '#3fb950'],
+            borderColor: '#161b22', borderWidth: 3, hoverOffset: 8,
+        }]
+    },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '60%',
+            plugins: { legend: { position: 'right', labels: { color: '#8b949e', font: { family: 'Inter', size: 12 }, padding: 16, usePointStyle: true, pointStyleWidth: 12 } } }
+        }
+});
+
+        const catCtx = document.getElementById('categoryChart').getContext('2d');
+        new Chart(catCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Complexity Flags', 'Spelling', 'CSS Issues', 'Placeholder', 'Accessibility'],
+                datasets: [{
+                    label: 'Count',
+                    data: [{{ category_counts.flags }}, {{ category_counts.spelling }}, {{ category_counts.css }}, {{ category_counts.placeholder }}, {{ category_counts.a11y }}],
+            backgroundColor: ['rgba(188,140,255,0.7)', 'rgba(240,136,62,0.7)', 'rgba(210,153,34,0.7)', 'rgba(248,81,73,0.5)', 'rgba(88,166,255,0.7)'],
+            borderColor: ['#bc8cff', '#f0883e', '#d29922', '#f85149', '#58a6ff'],
+            borderWidth: 2, borderRadius: 8, borderSkipped: false,
+        }]
+    },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { family: 'Inter' } } }, x: { grid: { display: false }, ticks: { color: '#8b949e', font: { family: 'Inter', weight: 600 } } } }
+        }
+});
+
+        // ===== SECTION NAV =====
+        function showSection(section) {
+            const allSections = document.querySelectorAll('.defect-section');
+            const allTabs = document.querySelectorAll('.nav-tab');
+            allTabs.forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            if (section === 'all') {
+                allSections.forEach(s => s.style.display = '');
+            } else {
+                allSections.forEach(s => {
+                    s.style.display = (s.dataset.section === section) ? '' : 'none';
+                });
+            }
+        }
+
+        // ===== EXPAND/COLLAPSE =====
+        function toggleDetail(id, trigger) {
+            const row = document.getElementById(id);
+            const isVisible = row.classList.contains('visible');
+            document.querySelectorAll('.issue-detail-row.visible').forEach(r => r.classList.remove('visible'));
+            document.querySelectorAll('.file-row.expanded').forEach(r => r.classList.remove('expanded'));
+            if (!isVisible) { row.classList.add('visible'); trigger.classList.add('expanded'); }
+        }
+
+        // ===== FILTER TABLE =====
+        function filterTable() {
+            const search = document.getElementById('fileSearch').value.toLowerCase();
+            const risk = document.getElementById('riskFilter').value;
+            document.querySelectorAll('.file-row').forEach(row => {
+                const name = row.getAttribute('data-name');
+                const rowRisk = row.getAttribute('data-risk');
+                const show = (!search || name.includes(search)) && (!risk || rowRisk === risk);
+                row.style.display = show ? '' : 'none';
+                const next = row.nextElementSibling;
+                if (next && next.classList.contains('issue-detail-row')) { next.classList.remove('visible'); row.classList.remove('expanded'); }
+            });
+        }
+
+        // ===== SORT TABLE =====
+        let sortCol = -1, sortAsc = true;
+        function sortTable(col) {
+            if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; }
+            const tbody = document.querySelector('#fileTable tbody');
+            const pairs = []; const rows = tbody.querySelectorAll('tr');
+            for (let i = 0; i < rows.length; i += 2) pairs.push([rows[i], rows[i + 1]]);
+            const riskOrder = { 'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3, 'CLEAN': 4 };
+            pairs.sort((a, b) => {
+                let va = a[0].children[col].textContent.trim(), vb = b[0].children[col].textContent.trim();
+                if (col === 1) { va = riskOrder[va] ?? 99; vb = riskOrder[vb] ?? 99; }
+                else if (col >= 2) { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+                else { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+                if (va < vb) return sortAsc ? -1 : 1; if (va > vb) return sortAsc ? 1 : -1; return 0;
+            });
+            pairs.forEach(([f, d]) => { tbody.appendChild(f); tbody.appendChild(d); });
+            document.querySelectorAll('#fileTable th').forEach((th, i) => {
+                th.classList.toggle('sorted', i === col);
+                const icon = th.querySelector('.sort-icon');
+                if (icon) icon.textContent = (i === col) ? (sortAsc ? '↑' : '↓') : '⇅';
+            });
+        }
+    </script>
+</body>
+
+</html>

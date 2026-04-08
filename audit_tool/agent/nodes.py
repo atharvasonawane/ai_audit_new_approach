@@ -9,7 +9,7 @@ from tools.db_tools import get_high_risk_files, get_file_report, get_summary_sta
 from tools.code_tools import fetch_vue_block
 
 # Initialize the LLM and System Message locally
-llm = ChatOllama(model="qwen2.5-coder:3b", temperature=0.0, num_ctx=8192)
+llm = ChatOllama(model="qwen2.5-coder:3b", temperature=0.0, num_ctx=1024)
 
 
 def router_node(state: GraphState) -> GraphState:

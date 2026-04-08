@@ -37,6 +37,6 @@ def build_graph():
     # End
     workflow.add_edge("synthesizer", END)
     
-    return workflow.compile()
+    return workflow.compile ()
     
 agent = build_graph()
