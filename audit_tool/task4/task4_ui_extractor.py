@@ -22,10 +22,14 @@ CONFIG_PATH = str(BASE / "config" / "project_config.yaml")
 sys.path.insert(0, str(TASK2_BASE))
 import yaml
 from extractors.vue_parser import parse_vue_file
+from extractors.path_utils import normalize_path, get_all_vue_files
 from db.db_writer import _get_connection, _get_file_id
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)s -- %(message)s")
 logger = logging.getLogger("task4_ui_extractor")
+
+# Module-level base_path for path normalization (set in main())
+_BASE_PATH = ""
 
 HEADER_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6", "pageheader", "baseheader"}
 
@@ -102,11 +106,8 @@ def process_vue_file(file_path):
     parsed = parse_vue_file(str(file_path))
     template_node = parsed.get("template_node")
     
-    norm_path = str(file_path).replace("\\", "/")
-    if "src/" in norm_path:
-        clean_file_path = "src/" + norm_path.split("src/")[-1]
-    else:
-        clean_file_path = norm_path
+    # Normalize path using shared utility
+    clean_file_path = normalize_path(str(file_path), _BASE_PATH)
         
     result = {
         "file": clean_file_path,
@@ -246,26 +247,15 @@ def main():
     if not base_path:
         logger.error("base_path not defined in config")
         sys.exit(1)
+
+    # Store base_path globally so process_vue_file can use it for normalization
+    global _BASE_PATH
+    _BASE_PATH = base_path
         
-    base_dir = BASE / Path(base_path)
-    components_dir = base_dir / "components"
-    views_dir = base_dir / "views"
-    
-    # Note: Using absolute path resolution considering run_audit location.
-    # The config base_path is "./client/src", so BASE / "./client/src/components"
-    
-    vue_files = []
-    if components_dir.exists():
-        vue_files.extend(list(components_dir.rglob("*.vue")))
-    if views_dir.exists():
-        vue_files.extend(list(views_dir.rglob("*.vue")))
+    # Scan ALL .vue files under base_path (not just components/views)
+    vue_files = get_all_vue_files(base_path)
         
-    # Also include the sample adminLogin.vue for testing if it's at project root
-    sample_admin = BASE.parent / "adminLogin.vue"
-    if sample_admin.exists() and sample_admin not in vue_files:
-        vue_files.append(sample_admin)
-        
-    logger.info(f"Found {len(vue_files)} .vue files in components/ and views/")
+    logger.info(f"Found {len(vue_files)} .vue files under base_path")
     
     extraction_results = []
     

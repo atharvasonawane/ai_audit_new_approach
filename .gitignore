@@ -34,3 +34,7 @@ Task3_extracted.txt
 *.docx
 !requirements.txt
 !*web_tech_words.txt
+v3_architecture_summary.md
+
+# AI Docs
+AI_STATUS.md

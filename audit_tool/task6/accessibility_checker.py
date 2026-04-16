@@ -19,7 +19,11 @@ CONFIG_PATH = str(BASE / "config" / "project_config.yaml")
 sys.path.insert(0, str(TASK2_BASE))
 import yaml
 from extractors.vue_parser import parse_vue_file
+from extractors.path_utils import normalize_path, get_all_vue_files
 from db.db_writer import _get_connection, write_accessibility_defect, _get_file_id
+
+# Module-level base_path for path normalization (set in main())
+_BASE_PATH = ""
 
 try:
     from tree_sitter import Parser
@@ -131,13 +135,8 @@ def process_vue_file(file_path, cfg, report_list):
     # Use the dynamic module name from cfg (calculated in run_audit.py)
     module_name = cfg.get("module", "unknown")
     
-    norm_path = str(file_path).replace("\\", "/")
-    
-    # Determine clean_file_path: prefer src/-relative, else use full absolute path
-    if "src/" in norm_path:
-        clean_file_path = "src/" + norm_path.split("src/")[-1]
-    else:
-        clean_file_path = norm_path
+    # Normalize path using shared utility
+    clean_file_path = normalize_path(str(file_path), _BASE_PATH)
     
     # Needs db file_id (we assume run_audit created vue_files)
     conn = _get_connection(cfg)
@@ -337,19 +336,13 @@ def main(cfg=None):
         cfg["db"]["database"] = os.getenv("MYSQL_DATABASE", cfg["db"].get("database", "code_audit_db"))
 
     base_path = cfg.get("base_path", "")
-    base_dir = BASE / Path(base_path)
-    components_dir = base_dir / "components"
-    views_dir = base_dir / "views"
+
+    # Store base_path globally so process_vue_file can use it for normalization
+    global _BASE_PATH
+    _BASE_PATH = base_path
     
-    vue_files = []
-    if components_dir.exists():
-        vue_files.extend(list(components_dir.rglob("*.vue")))
-    if views_dir.exists():
-        vue_files.extend(list(views_dir.rglob("*.vue")))
-        
-    sample_admin = BASE.parent / "adminLogin.vue"
-    if sample_admin.exists() and sample_admin not in vue_files:
-        vue_files.append(sample_admin)
+    # Scan ALL .vue files under base_path (not just components/views)
+    vue_files = get_all_vue_files(base_path)
         
     logger.info(f"Found {len(vue_files)} .vue files for Accessibility Checker")
     

@@ -1,6 +1,6 @@
 project: digital_university
 module: 
-base_path: C:/Users/Atharvaso/Desktop/PortalManagement/client/app/src
+base_path: C:/Users/Atharvaso/Desktop/StudentManagement/StudentManagement/client/app
 vue_version: 2
 
 mql:

@@ -125,6 +125,8 @@ def parse_vue_file(filepath: str) -> dict:
         "template_node": None,
         "script_text": None,
         "style_text": None,
+        "is_script_setup": False,
+        "script_lang": None,
     }
 
     # --- Guard: tree-sitter must be available ---
@@ -197,6 +199,21 @@ def parse_vue_file(filepath: str) -> dict:
                 script_text = _extract_block_text(child, source_bytes, "script", filepath)
                 result["script_text"] = script_text
 
+                # Detect <script setup> and <script lang="ts">
+                # The start_tag children contain attribute nodes
+                for sub in child.children:
+                    if sub.type == "start_tag":
+                        tag_text = source_bytes[sub.start_byte:sub.end_byte].decode(
+                            "utf-8", errors="replace"
+                        ).lower()
+                        if "setup" in tag_text:
+                            result["is_script_setup"] = True
+                        # Detect lang="ts" or lang="typescript"
+                        if 'lang="ts"' in tag_text or "lang='ts'" in tag_text or \
+                           'lang="typescript"' in tag_text or "lang='typescript'" in tag_text:
+                            result["script_lang"] = "ts"
+                        break
+
         elif node_type == "style_element":
             if result["style_text"] is not None:
                 logger.warning(
@@ -217,8 +234,8 @@ def parse_vue_file(filepath: str) -> dict:
 
     if has_error_nodes:
         logger.debug(
-            "[vue_parser] '%s' contained ERROR nodes (proprietary MQL syntax). "
-            "This is expected for Digital University files.", filepath
+            "[vue_parser] '%s' contained ERROR nodes (possibly non-standard syntax). "
+            "This is expected for files with proprietary framework syntax.", filepath
         )
 
     return result
@@ -319,7 +336,17 @@ def get_all_vue_files(base_path: str) -> list[str]:
         )
         return []
 
-    vue_files = sorted(str(p) for p in base.rglob("*.vue"))
+    # Directories to exclude — third-party libraries and build artifacts
+    # would pollute audit results with irrelevant data.
+    EXCLUDED_DIRS = {
+        "node_modules", "dist", "build", ".nuxt", ".output",
+        "coverage", ".git", "__pycache__", ".vscode", ".idea",
+    }
+
+    vue_files = sorted(
+        str(p) for p in base.rglob("*.vue")
+        if not any(part in EXCLUDED_DIRS for part in p.parts)
+    )
 
     if not vue_files:
         logger.warning(

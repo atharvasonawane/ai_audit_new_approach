@@ -200,6 +200,14 @@ def write_file_result(cfg: dict, result: dict) -> None:
     conf      = result.get("confidence", "HIGH")
     now       = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # Normalize filepath BEFORE inserting — all downstream consumers
+    # (task5, task7, db_report_loader) read from this table, so clean
+    # paths here eliminate the need to normalize on every read.
+    base_path = cfg.get("base_path", "") if cfg else ""
+    if base_path:
+        from extractors.path_utils import normalize_path
+        filepath = normalize_path(filepath, base_path)
+
     try:
         # ── 1. vue_files ─────────────────────────────────────────────────
         cur.execute("""

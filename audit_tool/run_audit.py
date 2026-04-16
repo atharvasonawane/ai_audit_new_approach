@@ -50,22 +50,20 @@ logger = logging.getLogger("run_audit")
 # ── Load config ───────────────────────────────────────────────────────────────
 cfg      = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
 
-# Dynamically override the module name based on the base_path so it never has to be manually set
-import re
-base_path_str = cfg.get("base_path", "").replace("\\", "/")
-if base_path_str:
-    # Specifically target the folder one level ABOVE 'client'
-    match = re.search(r"([^/]+)/client", base_path_str, re.IGNORECASE)
-    if match:
-        cfg["module"] = match.group(1)
+# Dynamically set the module name. Priority:
+# 1. Explicit 'module' field in config (if set and non-empty)
+# 2. 'project' field from config
+# 3. Heuristic: parent folder name of base_path
+if not cfg.get("module"):
+    if cfg.get("project"):
+        cfg["module"] = cfg["project"]
     else:
-        # Fallback 1: If no 'client', look for folder above 'src'
-        match = re.search(r"([^/]+)/src", base_path_str, re.IGNORECASE)
-        if match:
-            cfg["module"] = match.group(1)
-        else:
-            # Fallback 2: Just use the leaf folder name
+        base_path_str = cfg.get("base_path", "").replace("\\", "/").rstrip("/")
+        if base_path_str:
+            # Use the leaf folder name as module identifier
             cfg["module"] = Path(base_path_str).name
+        else:
+            cfg["module"] = "unknown"
 
 # Load environment variables and override database credentials safely
 load_dotenv()

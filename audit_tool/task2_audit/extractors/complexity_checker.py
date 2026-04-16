@@ -102,9 +102,23 @@ def check_complexity(script_text: str) -> dict:
 
             methods, computed, watchers = _count_from_ast(root, source_bytes)
             logger.debug(
-                "[complexity_checker] AST: methods=%d computed=%d watchers=%d",
+                "[complexity_checker] AST (Options API): methods=%d computed=%d watchers=%d",
                 methods, computed, watchers
             )
+
+            # If Options API found nothing, try Composition API counting.
+            # In <script setup> or defineComponent({ setup() {...} }), there's
+            # no methods/computed/watch object — instead they use function calls.
+            if methods == 0 and computed == 0 and watchers == 0:
+                comp_m, comp_c, comp_w = _count_composition_api(root, source_bytes)
+                if comp_m > 0 or comp_c > 0 or comp_w > 0:
+                    methods  = comp_m
+                    computed = comp_c
+                    watchers = comp_w
+                    logger.debug(
+                        "[complexity_checker] AST (Composition API): methods=%d computed=%d watchers=%d",
+                        methods, computed, watchers
+                    )
         except Exception as exc:
             logger.warning("[complexity_checker] AST walk failed (%s); using regex.", exc)
             methods, computed, watchers = _count_from_regex(script_text)
@@ -217,6 +231,65 @@ def _count_object_keys(obj_node) -> int:
         1 for c in obj_node.children
         if c.type in ("pair", "method_definition", "shorthand_property_identifier")
     )
+
+
+# ---------------------------------------------------------------------------
+# Composition API counting (Vue 3 <script setup>)
+# ---------------------------------------------------------------------------
+
+# Function names that count as "computed" in Composition API
+_COMPOSITION_COMPUTED = {"computed"}
+# Function names that count as "watchers" in Composition API
+_COMPOSITION_WATCHERS = {"watch", "watchEffect", "watchPostEffect", "watchSyncEffect"}
+
+
+def _count_composition_api(root, source_bytes: bytes) -> tuple:
+    """
+    Count metrics for Vue 3 Composition API / <script setup> components.
+
+    In Composition API, there are no methods/computed/watch objects.
+    Instead:
+        - methods = top-level function declarations and const arrow/function expressions
+        - computed = calls to computed(() => ...)
+        - watchers = calls to watch() / watchEffect()
+
+    Returns:
+        tuple: (methods_count, computed_count, watchers_count)
+    """
+    methods = 0
+    computed = 0
+    watchers = 0
+
+    def _walk(node):
+        nonlocal methods, computed, watchers
+
+        # Count function declarations at top level: function foo() { ... }
+        if node.type == "function_declaration":
+            methods += 1
+
+        # Count const arrow/function expressions: const foo = () => { ... }
+        # These appear as: lexical_declaration > variable_declarator > arrow_function/function
+        if node.type == "variable_declarator":
+            for child in node.children:
+                if child.type in ("arrow_function", "function_expression", "function"):
+                    methods += 1
+                    break
+
+        # Count calls to computed(), watch(), watchEffect()
+        if node.type == "call_expression":
+            fn = node.child_by_field_name("function")
+            if fn and fn.type == "identifier":
+                fn_name = source_bytes[fn.start_byte:fn.end_byte].decode("utf-8", errors="replace")
+                if fn_name in _COMPOSITION_COMPUTED:
+                    computed += 1
+                elif fn_name in _COMPOSITION_WATCHERS:
+                    watchers += 1
+
+        for child in node.children:
+            _walk(child)
+
+    _walk(root)
+    return methods, computed, watchers
 
 
 # ---------------------------------------------------------------------------

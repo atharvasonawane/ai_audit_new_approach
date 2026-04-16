@@ -7,8 +7,15 @@ Description: The unified issue detection engine for Task 7. It processes data fe
 
 import json
 import logging
+import sys
 from pathlib import Path
 from . import db_report_loader
+
+# Import shared path normalization utility
+_issue_det_base = Path(__file__).resolve().parent.parent / "task2_audit"
+if str(_issue_det_base) not in sys.path:
+    sys.path.insert(0, str(_issue_det_base))
+from extractors.path_utils import normalize_path
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +111,14 @@ def main(cfg: dict):
     total_issues = 0
     most_critical_file = None
 
+    # Get base_path from config for path normalization
+    base_path = cfg.get("base_path", "")
+
     for f in vue_files:
         fid = f.get("id")
-        fpath = f.get("file_path", "")
+        fpath_raw = f.get("file_path", "")
+        # Normalize path: strip base_path prefix to get clean relative path
+        fpath = normalize_path(fpath_raw, base_path)
         
         file_api_calls = api_by_file.get(fid, [])
         file_flags = flags_by_file.get(fid, [])
