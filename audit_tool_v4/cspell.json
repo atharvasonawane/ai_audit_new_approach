@@ -1,0 +1,41 @@
+{
+  "version": "0.2",
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
+  "language": "en",
+  "words": [
+    "vuex", "pinia", "vite", "nuxt", "composable", "composables",
+    "defineprops", "defineemits", "defineexpose", "withdefaults",
+    "readonly", "readonly", "nullable", "noop", "axios",
+    "i18n", "l10n", "interpolation", "teleport", "suspense",
+    "vmodel", "keydown", "keyup", "mousedown", "mouseup",
+    "focusout", "focusin", "scrollbar", "tooltip", "dropdown",
+    "navbar", "sidebar", "breadcrumb", "paginate", "sanitize",
+    "stringify", "debounce", "throttle", "mixin", "mixins",
+    "accessor", "accessors", "getter", "getters", "setter", "setters",
+    "destructure", "destructured", "refactored", "lifecycle",
+    "WCAG", "aria", "tabindex", "autofocus", "contenteditable",
+    "eslint", "stylelint", "cspell", "jscpd", "depcruise"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.git/**",
+    "**/.nuxt/**",
+    "**/*.min.js",
+    "**/package-lock.json",
+    "**/yarn.lock"
+  ],
+  "overrides": [
+    {
+      "filename": "**/*.vue",
+      "language": "html"
+    },
+    {
+      "filename": "**/*.{js,ts}",
+      "language": "javascript"
+    }
+  ],
+  "enableFiletypes": ["vue", "javascript", "typescript"],
+  "maxNumberOfProblems": 10000,
+  "minWordLength": 4
+}

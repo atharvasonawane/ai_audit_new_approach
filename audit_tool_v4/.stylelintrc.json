@@ -1,0 +1,21 @@
+{
+  "_comment": "Stylelint config for V4 Vue Audit Pipeline. Passed via --config flag by the Python orchestrator.",
+  "extends": ["stylelint-config-standard"],
+  "customSyntax": "postcss-html",
+  "rules": {
+    "color-named":                      "never",
+    "no-descending-specificity":        null,
+    "selector-class-pattern":           null,
+    "alpha-value-notation":             "number",
+    "declaration-empty-line-before":    null,
+    "comment-empty-line-before":        null,
+    "custom-property-empty-line-before": null,
+    "rule-empty-line-before":           null
+  },
+  "ignoreFiles": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.nuxt/**",
+    "**/*.min.css"
+  ]
+}

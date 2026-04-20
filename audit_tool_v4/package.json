@@ -1,0 +1,31 @@
+{
+  "name": "vue-audit-v4-node-tools",
+  "version": "1.0.0",
+  "description": "Node.js static analysis tools for the V4 Code Audit Pipeline",
+  "private": true,
+  "scripts": {
+    "lint":    "eslint . --ext .vue,.js,.ts --format json",
+    "style":   "stylelint \"**/*.{vue,css,scss}\" --formatter json",
+    "spell":   "cspell \"**/*.{vue,js,ts}\" --reporter json",
+    "depcruise": "depcruise src --output-type json",
+    "duplication": "jscpd . --reporters json --ignore \"**/node_modules/**,**/dist/**\""
+  },
+  "devDependencies": {
+    "eslint":                            "^8.57.0",
+    "vue-eslint-parser":                 "^9.4.3",
+    "eslint-plugin-vue":                 "^9.26.0",
+    "eslint-plugin-vuejs-accessibility": "^2.5.0",
+    "@babel/eslint-parser":              "^7.24.1",
+    "@babel/core":                       "^7.24.4",
+    "stylelint":                         "^16.3.1",
+    "stylelint-config-standard":         "^40.0.0",
+    "postcss-html":                      "^1.6.0",
+    "cspell":                            "^8.8.4",
+    "vue-mess-detector":                 "^0.68.0",
+    "dependency-cruiser":                "^17.3.10",
+    "jscpd":                             "^4.0.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
