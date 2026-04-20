@@ -70,6 +70,7 @@ LINES_LARGE    = 500   # LARGE_COMPONENT
 METHODS_MANY   = 15    # MANY_METHODS
 COMPUTED_MANY  = 10    # MANY_COMPUTED
 WATCHERS_MANY  = 5     # MANY_WATCHERS
+PROPS_MANY     = 10    # TOO_MANY_PROPS
 
 # F. Template thresholds
 TEMPLATE_COMPLEX   = 200  # lines
@@ -97,6 +98,7 @@ def evaluate_flags(
     template_lines:   int   = 0,
     child_components: int   = 0,
     max_nesting_depth:int   = 0,
+    prop_count:       int   = 0,
     # --- Payload (from payload analysis) ---
     payload_keys:     int   = 0,
     payload_depth:    int   = 0,
@@ -122,6 +124,7 @@ def evaluate_flags(
         template_lines   (int)  : Line count of the <template> block.
         child_components (int)  : Number of distinct child component tags.
         max_nesting_depth(int)  : Deepest v-if / v-for nesting level.
+        prop_count       (int)  : Number of props defined in the component.
         payload_keys     (int)  : Top-level keys in the largest payload.
         payload_depth    (int)  : Nesting depth of that payload.
         payload_size_kb  (float): Estimated payload size in kilobytes.
@@ -204,9 +207,13 @@ def evaluate_flags(
         # Condition: Watchers > 5
         flags.add("MANY_WATCHERS")
 
+    if prop_count > PROPS_MANY:
+        # Condition: Props > 10
+        flags.add("TOO_MANY_PROPS")
+
     logger.debug(
-        "[flag_engine] Component: lines=%d, methods=%d, computed=%d, watchers=%d",
-        lines, methods, computed, watchers
+        "[flag_engine] Component: lines=%d, methods=%d, computed=%d, watchers=%d, props=%d",
+        lines, methods, computed, watchers, prop_count
     )
 
     # -----------------------------------------------------------------------
@@ -301,7 +308,7 @@ def evaluate_flags(
         "PAYLOAD":   {"COMPLEX_PAYLOAD", "VERY_COMPLEX_PAYLOAD", "DEEP_NESTED_PAYLOAD",
                       "LARGE_PAYLOAD"},
         "COMPONENT": {"LARGE_COMPONENT", "MANY_METHODS", "MANY_COMPUTED",
-                      "MANY_WATCHERS"},
+                      "MANY_WATCHERS", "TOO_MANY_PROPS"},
         "PATTERN":   {"API_IN_LOOP", "API_CHAINING", "DEPENDENT_API_CALLS",
                       "DUPLICATE_API_CALLS"},
         "TEMPLATE":  {"COMPLEX_TEMPLATE", "DEEP_NESTED_TEMPLATE", "MANY_CHILDREN"},
@@ -350,7 +357,7 @@ def summarise_flags(flags: list) -> dict:
         "PAYLOAD":   {"COMPLEX_PAYLOAD", "VERY_COMPLEX_PAYLOAD", "DEEP_NESTED_PAYLOAD",
                       "LARGE_PAYLOAD"},
         "COMPONENT": {"LARGE_COMPONENT", "MANY_METHODS", "MANY_COMPUTED",
-                      "MANY_WATCHERS"},
+                      "MANY_WATCHERS", "TOO_MANY_PROPS"},
         "COMBINED":  {"HIGH_RISK_COMPONENT", "CRITICAL_COMPONENT", "HEAVY_COMPONENT",
                       "MONOLITH_COMPONENT", "COMPLEX_HEAVY_COMPONENT",
                       "ARCHITECTURE_CONCERN"},

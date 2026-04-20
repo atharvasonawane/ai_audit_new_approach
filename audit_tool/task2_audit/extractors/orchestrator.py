@@ -41,6 +41,7 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
     from extractors.complexity_checker import check_complexity
     from extractors.template_extractor import extract_template_metrics
     from extractors.api_extractor      import extract_api_calls
+    from extractors.props_emits_extractor import extract_props_emits
     from checkers.flag_engine          import evaluate_flags, summarise_flags
 
     # Use the dynamic module name from cfg (calculated in run_audit.py)
@@ -55,9 +56,11 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
             "api_total": 0, "api_in_mounted": 0, "api_duplicates": [],
             "template_lines": 0, "child_components": 0, "max_nest_depth": 0,
             "payload_keys": 0, "payload_depth": 0, "payload_size_kb": 0.0,
+            "prop_count": 0,
         },
         "api_calls": [], "flags_triggered": [], "flags_by_category": {},
         "flags_count": 0, "error": None,
+        "props": [], "emits": []
     }
 
     try:
@@ -66,6 +69,8 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
             source_bytes = f.read()
         parsed     = parse_vue_file(filepath)
         raw_script = parsed.get("script_text") or ""
+        script_lang = parsed.get("script_lang", "js")
+        script_ts_tree = parsed.get("script_ts_tree")
         tmpl_node  = parsed.get("template_node")
 
         # Step 2: Clean
@@ -75,8 +80,15 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
         complexity = check_complexity(
             script_text=raw_script,
             template_node=tmpl_node,
-            script_lang=parsed.get("script_lang", "js"),
-            script_ts_tree=parsed.get("script_ts_tree")
+            script_lang=script_lang,
+            script_ts_tree=script_ts_tree
+        )
+        
+        # Step 3.5: Props & Emits
+        props_emits = extract_props_emits(
+            script_text=raw_script,
+            script_lang=script_lang,
+            script_ts_tree=script_ts_tree
         )
 
         # Step 4: Template
@@ -96,6 +108,7 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
             template_lines    = template["template_lines"],
             child_components  = template["child_components"],
             max_nesting_depth = template["max_nesting_depth"],
+            prop_count        = len(props_emits["props"]),
             payload_keys      = 0,
             payload_depth     = 0,
             payload_size_kb   = 0.0,
@@ -117,11 +130,14 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
                 "template_lines"  : template["template_lines"],
                 "child_components": template["child_components"],
                 "max_nest_depth"  : template["max_nesting_depth"],
+                "prop_count"      : len(props_emits["props"]),
                 "payload_keys"    : 0,
                 "payload_depth"   : 0,
                 "payload_size_kb" : 0.0,
             },
             "api_calls"         : api_data["calls"],
+            "props"             : props_emits["props"],
+            "emits"             : props_emits["emits"],
             "flags_triggered"   : flags,
             "flags_by_category" : flag_summary,
             "flags_count"       : len(flags),

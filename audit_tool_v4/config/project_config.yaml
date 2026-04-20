@@ -1,0 +1,14 @@
+# project_config.yaml
+# Single source of truth for pipeline configuration
+
+# Path to the source code to be scanned
+base_path: "C:/Users/Atharvaso/Desktop/PortalManagement/client/app"
+project_name: "PortalManagement-Client"
+
+# Database credentials (passwords should be overridden by .env)
+db:
+  host: "localhost"
+  port: 3306
+  user: "root"
+  password: "mysql@atharva04"
+  database: "code_audit_db"
