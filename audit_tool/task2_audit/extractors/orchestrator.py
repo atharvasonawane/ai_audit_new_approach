@@ -72,7 +72,12 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
         clean = clean_script(raw_script)
 
         # Step 3: Complexity
-        complexity = check_complexity(raw_script)
+        complexity = check_complexity(
+            script_text=raw_script,
+            template_node=tmpl_node,
+            script_lang=parsed.get("script_lang", "js"),
+            script_ts_tree=parsed.get("script_ts_tree")
+        )
 
         # Step 4: Template
         template = extract_template_metrics(tmpl_node, source_bytes)
