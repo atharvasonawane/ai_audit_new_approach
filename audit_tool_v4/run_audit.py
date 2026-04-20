@@ -30,6 +30,10 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
+from adapters import adapt_all
+from extractors.ast_extractor import extract_api_calls
+from db import db_loader
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths
 # ─────────────────────────────────────────────────────────────────────────────
@@ -453,13 +457,36 @@ def main() -> None:
 
     _print_summary(results, total_elapsed)
 
-    # ── Phase 2 stub (adapter normalization — coming next step) ───────────────
-    logger.info(
-        "Phase 1 capture complete. %d/%d tools produced JSON output. "
-        "Adapter normalization (Phase 2) not yet implemented.",
-        sum(1 for r in results if r.raw_json is not None),
-        len(results),
-    )
+    # ── Phase 2 & 3: Adapter Normalisation & API Extraction ───────────────────
+    print()
+    print("  Phase 2: Running tool adapters and AST extraction...")
+    
+    project_name = cfg.get("project_name", "Unknown Project")
+    
+    # 1. Normalise node tool JSON
+    report = adapt_all(results, base_path, project_name)
+    
+    # 2. Extract API calls structurally
+    api_findings = extract_api_calls(base_path)
+    report.results.extend(api_findings)
+    
+    print(f"  ✓ SARIF schema compiled: {len(report.results)} total findings.")
+
+    # ── Phase 4: Database Ingestion ───────────────────────────────────────────
+    print()
+    print("  Phase 3: Database ingestion...")
+    
+    try:
+        db_loader.setup_schema(cfg)
+        run_id = db_loader.ingest_report(cfg, report)
+        print(f"  ✓ Pre-flight schema check passed.")
+        print(f"  ✓ Metrics ingested successfully! (scan_run_id = {run_id})")
+        print()
+        print(f"  V4 Pipeline complete. Health Score: {report.health_score():.2f}/100")
+    except Exception as exc:
+        logger.error("Database ingestion failed: %s", exc)
+        print(f"  ✗ DB ingestion failed. See logs.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
