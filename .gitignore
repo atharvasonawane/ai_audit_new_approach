@@ -20,8 +20,15 @@ __pycache__/
 
 # Custom Exclusions for Code Audit Librarian
 *.json
+!audit_tool_v4/package.json
+!audit_tool_v4/package-lock.json
+!audit_tool_v4/cspell.json
+!audit_tool_v4/.stylelintrc.json
 # NOTE: project_config.yaml is tracked intentionally but MUST NOT contain real credentials.
 # All secrets (DB password, etc.) must live in .env — never hardcode them in the yaml.
+
+# V4 Pipeline — runtime outputs (never commit)
+audit_tool_v4/raw_outputs/
 
 # Test Files
 *adminLogin.vue
