@@ -242,3 +242,34 @@ class SARIFReport(BaseModel):
             "health_score"   : self.health_score(),
             "top_files"      : self.top_offending_files(),
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Structural Extractions
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ComponentMetricsModel(BaseModel):
+    file_path: str          # relative to base_path
+    script_lang: str        # "js" | "ts"
+    is_script_setup: bool
+    loc_script: int         # lines of code in <script>
+    loc_template: int       # lines of code in <template>
+    method_count: int
+    computed_count: int
+    watcher_count: int
+    prop_count: int
+    max_nesting_depth: int
+
+
+class UINodeModel(BaseModel):
+    file_path: str
+    element_type: str       # "header" | "button" | "visible_text"
+    text_content: str
+    is_dynamic: bool        # True if content has {{ }} interpolation
+    line: int
+
+
+class PropsEmitsModel(BaseModel):
+    file_path: str
+    props: list[str]        # ["title", "isActive", ...]
+    emits: list[str]        # ["update:modelValue", "close", ...]
