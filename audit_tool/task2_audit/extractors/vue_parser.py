@@ -84,6 +84,20 @@ def _build_language():
 
 VUE_LANGUAGE = _build_language()
 
+def _build_ts_language():
+    """Build and return tree-sitter Language object for TypeScript."""
+    if not _TS_AVAILABLE:
+        return None
+    try:
+        import tree_sitter_typescript
+        from tree_sitter import Language
+        return Language(tree_sitter_typescript.language_typescript())
+    except Exception as exc:
+        logger.warning("[vue_parser] Failed to load TypeScript grammar: %s", exc)
+        return None
+
+TYPESCRIPT_LANGUAGE = _build_ts_language()
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -127,6 +141,7 @@ def parse_vue_file(filepath: str) -> dict:
         "style_text": None,
         "is_script_setup": False,
         "script_lang": None,
+        "script_ts_tree": None,
     }
 
     # --- Guard: tree-sitter must be available ---
@@ -213,6 +228,14 @@ def parse_vue_file(filepath: str) -> dict:
                            'lang="typescript"' in tag_text or "lang='typescript'" in tag_text:
                             result["script_lang"] = "ts"
                         break
+
+                # Re-parse script block if it's TypeScript
+                if result["script_lang"] == "ts" and result["script_text"] and TYPESCRIPT_LANGUAGE:
+                    try:
+                        ts_parser = Parser(TYPESCRIPT_LANGUAGE)
+                        result["script_ts_tree"] = ts_parser.parse(result["script_text"].encode("utf-8"))
+                    except Exception as exc:
+                        logger.warning("[vue_parser] Failed to parse TS block for '%s': %s", filepath, exc)
 
         elif node_type == "style_element":
             if result["style_text"] is not None:

@@ -452,7 +452,6 @@ def adapt_vue_mess_detector(raw_json: dict | list, base_path: str) -> list[SARIF
             ))
         except Exception as exc:
             logger.debug("[adapt_vmd] Skipped (%s/%s): %s", rule_id, rel_path, exc)
-            nonlocal skipped  # type: ignore[misc]
             skipped += 1
 
     # ── Shape 1: {"codeHealthOutput": [...]} ─────────────────────────────────

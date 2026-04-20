@@ -67,11 +67,11 @@ def _load_config() -> dict:
     load_dotenv(BASE.parent / ".env")      # project-level .env
     if "db" not in cfg:
         cfg["db"] = {}
-    cfg["db"]["host"]     = os.getenv("MYSQL_HOST",     cfg["db"].get("host",     "localhost"))
-    cfg["db"]["port"]     = int(os.getenv("MYSQL_PORT", cfg["db"].get("port",     3306)))
-    cfg["db"]["user"]     = os.getenv("MYSQL_USER",     cfg["db"].get("user",     "root"))
-    cfg["db"]["password"] = os.getenv("MYSQL_PASSWORD", cfg["db"].get("password", ""))
-    cfg["db"]["database"] = os.getenv("MYSQL_DATABASE", cfg["db"].get("database", "code_audit_db"))
+    cfg["db"]["host"]     = cfg["db"].get("host") or os.getenv("ANALYZER_DB_HOST", "localhost")
+    cfg["db"]["port"]     = int(cfg["db"].get("port") or os.getenv("ANALYZER_DB_PORT", 3306))
+    cfg["db"]["user"]     = cfg["db"].get("user") or os.getenv("ANALYZER_DB_USER", "root")
+    cfg["db"]["password"] = cfg["db"].get("password", os.getenv("ANALYZER_DB_PASS", ""))
+    cfg["db"]["database"] = cfg["db"].get("database") or os.getenv("ANALYZER_DB_NAME", "code_audit_db")
     return cfg
 
 
@@ -474,18 +474,25 @@ def main() -> None:
 
     # ── Phase 4: Database Ingestion ───────────────────────────────────────────
     print()
-    print("  Phase 3: Database ingestion...")
+    print("  Phase 3: Database ingestion (temporarily bypassed for dry run)...")
     
     try:
-        db_loader.setup_schema(cfg)
-        run_id = db_loader.ingest_report(cfg, report)
-        print(f"  ✓ Pre-flight schema check passed.")
-        print(f"  ✓ Metrics ingested successfully! (scan_run_id = {run_id})")
+        # Step 5.2: Bypass DB ingestion temporarily
+        # db_loader.setup_schema(cfg)
+        # run_id = db_loader.ingest_report(cfg, report)
+        # print(f"  ✓ Pre-flight schema check passed.")
+        # print(f"  ✓ Metrics ingested successfully! (scan_run_id = {run_id})")
+        
+        output_path = BASE / "dry_run_output.json"
+        with open(output_path, "w", encoding="utf-8") as fh:
+            fh.write(report.model_dump_json(indent=2))
+        
+        print(f"  ✓ SARIFReport serialized to {output_path.name}")
         print()
         print(f"  V4 Pipeline complete. Health Score: {report.health_score():.2f}/100")
     except Exception as exc:
-        logger.error("Database ingestion failed: %s", exc)
-        print(f"  ✗ DB ingestion failed. See logs.")
+        logger.error("Dry run serialization failed: %s", exc)
+        print(f"  ✗ Dry run serialization failed. See logs.")
         sys.exit(1)
 
 
