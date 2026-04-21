@@ -34,6 +34,8 @@ from typing import Iterator
 
 from ast_grep_py import SgRoot
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "audit_tool"))
 from schema_models import Category, SARIFResult, Severity
 
 logger = logging.getLogger(__name__)

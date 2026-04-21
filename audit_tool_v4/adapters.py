@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "audit_tool"))
 from schema_models import (
     Category,
     SARIFReport,

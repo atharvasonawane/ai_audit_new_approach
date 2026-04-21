@@ -173,6 +173,16 @@ def parse_vue_file(filepath: str) -> dict:
         logger.warning("[vue_parser] root_node is None for '%s'. Skipping.", filepath)
         return result
 
+    def count_errors(n) -> int:
+        count = 1 if n.type == "ERROR" else 0
+        for ch in n.children:
+            count += count_errors(ch)
+        return count
+
+    total_errors = count_errors(root)
+    if total_errors > 0:
+        logger.warning("[vue_parser] Found %d ERROR node(s) in '%s'.", total_errors, filepath)
+
     # --- Walk top-level children to extract blocks ---
     # A .vue SFC has three well-known top-level tag types:
     #   template_element  →  maps to <template>

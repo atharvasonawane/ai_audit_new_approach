@@ -28,10 +28,9 @@ from pathlib import Path
 
 import mysql.connector
 
-# Import the Pydantic models — path resolves because run_audit.py adds
-# audit_tool_v4/ to sys.path before importing this module.
+# Import the Pydantic models — path resolves because we add audit_tool
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "audit_tool"))
 from schema_models import SARIFReport, SARIFResult, Severity, Category
 
 logger = logging.getLogger(__name__)
@@ -165,6 +164,8 @@ def ingest_report(cfg: dict, report: SARIFReport) -> int:
         TypeError  : If report is not a SARIFReport instance.
         RuntimeError: On DB write failure (after rollback).
     """
+    from pydantic import ValidationError
+    
     if not isinstance(report, SARIFReport):
         raise TypeError(
             f"ingest_report() requires a SARIFReport instance, got {type(report).__name__}. "
@@ -213,21 +214,27 @@ def ingest_report(cfg: dict, report: SARIFReport) -> int:
                  file_path, line_number, col_number, message, snippet)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        rows = [
-            (
-                scan_run_id,
-                r.tool_name,
-                r.rule_id,
-                r.severity,    # already str via use_enum_values=True
-                r.category,    # already str
-                r.file_path,
-                r.line,
-                r.column,
-                r.message,
-                r.snippet,
-            )
-            for r in report.results
-        ]
+        rows = []
+        for r in report.results:
+            try:
+                # Force re-validation just in case the object was manipulated directly
+                SARIFResult.model_validate(r)
+                d = r.model_dump()
+                rows.append((
+                    scan_run_id,
+                    d["tool_name"],
+                    d["rule_id"],
+                    d["severity"],
+                    d["category"],
+                    d["file_path"],
+                    d["line"],
+                    d["column"],
+                    d["message"],
+                    d["snippet"],
+                ))
+            except ValidationError as ve:
+                logger.warning("[v4/db_loader] Skipped insert due to ValidationError in '%s': %s", r.file_path, ve)
+                continue
 
         if rows:
             cur.executemany(insert_sql, rows)

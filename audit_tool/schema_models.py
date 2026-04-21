@@ -273,3 +273,18 @@ class PropsEmitsModel(BaseModel):
     file_path: str
     props: list[str]        # ["title", "isActive", ...]
     emits: list[str]        # ["update:modelValue", "close", ...]
+
+
+class ESLintMessageModel(BaseModel):
+    """Raw message schema from ESLint JSON output."""
+    ruleId: Optional[str] = None
+    severity: int
+    message: str
+    line: Optional[int] = None
+    column: Optional[int] = None
+    nodeText: Optional[str] = None
+
+class RuleViolationModel(BaseModel):
+    """Raw top-level schema from ESLint JSON output per file."""
+    filePath: str
+    messages: list[ESLintMessageModel]
