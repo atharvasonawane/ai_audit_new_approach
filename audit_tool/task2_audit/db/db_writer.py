@@ -107,75 +107,86 @@ _DDL = [
 
 # Flag → category mapping
 _FLAG_CATEGORY = {
-    "HIGH_API_USAGE":      "API",  "VERY_HIGH_API_USAGE": "API",
-    "EXCESSIVE_API_USAGE": "API",  "HEAVY_MOUNTED_API":   "API",
-    "COMPLEX_PAYLOAD":     "PAYLOAD", "VERY_COMPLEX_PAYLOAD": "PAYLOAD",
-    "DEEP_NESTED_PAYLOAD": "PAYLOAD", "LARGE_PAYLOAD":       "PAYLOAD",
-    "LARGE_COMPONENT":     "COMPONENT", "MANY_METHODS":      "COMPONENT",
-    "MANY_COMPUTED":       "COMPONENT", "MANY_WATCHERS":     "COMPONENT",
-    "HIGH_RISK_COMPONENT": "COMBINED", "CRITICAL_COMPONENT":"COMBINED",
-    "HEAVY_COMPONENT":     "COMBINED", "MONOLITH_COMPONENT":"COMBINED",
-    "COMPLEX_HEAVY_COMPONENT": "COMBINED", "ARCHITECTURE_CONCERN": "COMBINED",
-    "API_IN_LOOP":         "PATTERN", "API_CHAINING":       "PATTERN",
-    "DEPENDENT_API_CALLS": "PATTERN", "DUPLICATE_API_CALLS":"PATTERN",
-    "COMPLEX_TEMPLATE":    "TEMPLATE", "DEEP_NESTED_TEMPLATE":"TEMPLATE",
-    "MANY_CHILDREN":       "TEMPLATE",
+    "HIGH_API_USAGE": "API",
+    "VERY_HIGH_API_USAGE": "API",
+    "EXCESSIVE_API_USAGE": "API",
+    "HEAVY_MOUNTED_API": "API",
+    "COMPLEX_PAYLOAD": "PAYLOAD",
+    "VERY_COMPLEX_PAYLOAD": "PAYLOAD",
+    "DEEP_NESTED_PAYLOAD": "PAYLOAD",
+    "LARGE_PAYLOAD": "PAYLOAD",
+    "LARGE_COMPONENT": "COMPONENT",
+    "MANY_METHODS": "COMPONENT",
+    "MANY_COMPUTED": "COMPONENT",
+    "MANY_WATCHERS": "COMPONENT",
+    "HIGH_RISK_COMPONENT": "COMBINED",
+    "CRITICAL_COMPONENT": "COMBINED",
+    "HEAVY_COMPONENT": "COMBINED",
+    "MONOLITH_COMPONENT": "COMBINED",
+    "COMPLEX_HEAVY_COMPONENT": "COMBINED",
+    "ARCHITECTURE_CONCERN": "COMBINED",
+    "API_IN_LOOP": "PATTERN",
+    "API_CHAINING": "PATTERN",
+    "DEPENDENT_API_CALLS": "PATTERN",
+    "DUPLICATE_API_CALLS": "PATTERN",
+    "COMPLEX_TEMPLATE": "TEMPLATE",
+    "DEEP_NESTED_TEMPLATE": "TEMPLATE",
+    "MANY_CHILDREN": "TEMPLATE",
 }
 
 
 def _get_connection(cfg: dict):
     """Open and return a mysql.connector connection from config dict."""
     import mysql.connector
+
     db = cfg["db"]
     return mysql.connector.connect(
-        host     = db.get("host", "localhost"),
-        port     = int(db.get("port", 3306)),
-        user     = db["user"],
-        password = db["password"],
-        database = db["database"],
-        autocommit = False,
+        host=db.get("host", "localhost"),
+        port=int(db.get("port", 3306)),
+        user=db["user"],
+        password=db["password"],
+        database=db["database"],
+        autocommit=False,
     )
 
 
 def setup_schema(cfg: dict) -> None:
     """
-    Drop all existing tables and recreate them fresh.
+    Ensure the MySQL schema exists without dropping data.
 
-    Called once at the start of every scan run so the database always
-    reflects ONLY the current scan — no leftover data from previous runs.
+    Called once at the start of every scan run to ensure tables exist.
+    Will not destroy leftover data from previous runs.
 
     Args:
         cfg (dict): Parsed project_config.yaml.
     """
     import mysql.connector
+
     db = cfg["db"]
     conn = mysql.connector.connect(
-        host     = db.get("host", "localhost"),
-        port     = int(db.get("port", 3306)),
-        user     = db["user"],
-        password = db["password"],
+        host=db.get("host", "localhost"),
+        port=int(db.get("port", 3306)),
+        user=db["user"],
+        password=db["password"],
     )
     cur = conn.cursor()
 
     # Create DB if missing
-    cur.execute(f"CREATE DATABASE IF NOT EXISTS `{db['database']}` "
-                f"CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+    cur.execute(
+        f"CREATE DATABASE IF NOT EXISTS `{db['database']}` "
+        f"CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    )
     cur.execute(f"USE `{db['database']}`")
 
-    # Drop tables in reverse FK order so constraints don't block the drop
-    cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-    for table in ("accessibility_defects", "ui_defects", "ui_extractions", "file_flags", "api_calls", "vue_files"):
-        cur.execute(f"DROP TABLE IF EXISTS `{table}`")
-        logger.debug("[db_writer] Dropped table '%s'.", table)
-    cur.execute("SET FOREIGN_KEY_CHECKS = 1")
-
-    # Recreate all tables fresh
+    # Recreate all tables fresh if missing
     for ddl in _DDL:
         cur.execute(ddl)
 
     conn.commit()
     conn.close()
-    logger.info("[db_writer] Database '%s' rebuilt from scratch.", db["database"])
+    logger.info(
+        "[db_writer] Database '%s' schema initialized/verified.", db["database"]
+    )
 
 
 def write_file_result(cfg: dict, result: dict) -> None:
@@ -190,15 +201,15 @@ def write_file_result(cfg: dict, result: dict) -> None:
         result (dict): The full result dict built by the orchestrator.
     """
     conn = _get_connection(cfg)
-    cur  = conn.cursor()
+    cur = conn.cursor()
 
-    metrics   = result.get("extracted_metrics", {})
+    metrics = result.get("extracted_metrics", {})
     mql_calls = result.get("api_calls", [])
-    flags     = result.get("flags_triggered", [])
-    filepath  = result.get("file", "")
-    module    = result.get("module", "")
-    conf      = result.get("confidence", "HIGH")
-    now       = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    flags = result.get("flags_triggered", [])
+    filepath = result.get("file", "")
+    module = result.get("module", "")
+    conf = result.get("confidence", "HIGH")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Normalize filepath BEFORE inserting — all downstream consumers
     # (task5, task7, db_report_loader) read from this table, so clean
@@ -206,11 +217,13 @@ def write_file_result(cfg: dict, result: dict) -> None:
     base_path = cfg.get("base_path", "") if cfg else ""
     if base_path:
         from extractors.path_utils import normalize_path
+
         filepath = normalize_path(filepath, base_path)
 
     try:
         # ── 1. vue_files ─────────────────────────────────────────────────
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO vue_files
                 (file_path, module, script_lines, methods, computed, watchers,
                  template_lines, child_components, max_nesting_depth,
@@ -226,20 +239,24 @@ def write_file_result(cfg: dict, result: dict) -> None:
                 api_total=VALUES(api_total), api_mounted=VALUES(api_mounted),
                 flag_count=VALUES(flag_count), confidence=VALUES(confidence),
                 scanned_at=VALUES(scanned_at)
-        """, (
-            filepath, module,
-            metrics.get("script_lines", 0),
-            metrics.get("methods", 0),
-            metrics.get("computed", 0),
-            metrics.get("watchers", 0),
-            metrics.get("template_lines", 0),
-            metrics.get("child_components", 0),
-            metrics.get("max_nest_depth", 0),
-            metrics.get("api_total", 0),
-            metrics.get("api_in_mounted", 0),
-            len(flags),
-            conf, now,
-        ))
+        """,
+            (
+                filepath,
+                module,
+                metrics.get("script_lines", 0),
+                metrics.get("methods", 0),
+                metrics.get("computed", 0),
+                metrics.get("watchers", 0),
+                metrics.get("template_lines", 0),
+                metrics.get("child_components", 0),
+                metrics.get("max_nest_depth", 0),
+                metrics.get("api_total", 0),
+                metrics.get("api_in_mounted", 0),
+                len(flags),
+                conf,
+                now,
+            ),
+        )
         file_id = cur.lastrowid or _get_file_id(cur, filepath)
 
         # ── 2. Clear old api_calls and file_flags for this file ───────────
@@ -248,27 +265,33 @@ def write_file_result(cfg: dict, result: dict) -> None:
 
         # ── 3. api_calls ─────────────────────────────────────────────────
         for call in mql_calls:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO api_calls
                     (file_id, api_type, method_name, full_match, in_mounted, in_loop, line_number)
                 VALUES (%s,%s,%s,%s,%s,%s,%s)
-            """, (
-                file_id,
-                call.get("type", "MQL"),
-                call.get("method", ""),
-                call.get("full_match", ""),
-                1 if call.get("in_mounted") else 0,
-                1 if call.get("in_loop")    else 0,
-                call.get("line_number", 0),
-            ))
+            """,
+                (
+                    file_id,
+                    call.get("type", "MQL"),
+                    call.get("method", ""),
+                    call.get("full_match", ""),
+                    1 if call.get("in_mounted") else 0,
+                    1 if call.get("in_loop") else 0,
+                    call.get("line_number", 0),
+                ),
+            )
 
         # ── 4. file_flags ─────────────────────────────────────────────────
         for flag in flags:
             category = _FLAG_CATEGORY.get(flag, "OTHER")
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO file_flags (file_id, flag_name, category)
                 VALUES (%s,%s,%s)
-            """, (file_id, flag, category))
+            """,
+                (file_id, flag, category),
+            )
 
         conn.commit()
         logger.debug("[db_writer] Saved: %s (%d flags)", filepath, len(flags))
@@ -287,6 +310,7 @@ def _get_file_id(cur, filepath: str) -> int:
     row = cur.fetchone()
     return row[0] if row else 0
 
+
 def export_db_to_json(cfg: dict, output_path: str) -> None:
     """
     Query the complete contents of the 3 database tables and dump them to a JSON file.
@@ -294,12 +318,12 @@ def export_db_to_json(cfg: dict, output_path: str) -> None:
     """
     conn = _get_connection(cfg)
     cur = conn.cursor(dictionary=True)
-    
+
     export_data = {
         "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "database": cfg["db"].get("database", "code_audit_db")
+        "database": cfg["db"].get("database", "code_audit_db"),
     }
-    
+
     try:
         # 1. vue_files
         cur.execute("SELECT * FROM vue_files")
@@ -308,19 +332,19 @@ def export_db_to_json(cfg: dict, output_path: str) -> None:
             if isinstance(f.get("scanned_at"), datetime):
                 f["scanned_at"] = f["scanned_at"].strftime("%Y-%m-%d %H:%M:%S")
         export_data["vue_files"] = files
-        
+
         # 2. api_calls
         cur.execute("SELECT * FROM api_calls")
         export_data["api_calls"] = cur.fetchall()
-        
+
         # 3. file_flags
         cur.execute("SELECT * FROM file_flags")
         export_data["file_flags"] = cur.fetchall()
-        
+
         # 4. ui_defects
         cur.execute("SELECT * FROM ui_defects")
         export_data["ui_defects"] = cur.fetchall()
-        
+
         # 5. accessibility_defects
         cur.execute("SELECT * FROM accessibility_defects")
         defects = cur.fetchall()
@@ -328,17 +352,18 @@ def export_db_to_json(cfg: dict, output_path: str) -> None:
             if isinstance(d.get("scanned_at"), datetime):
                 d["scanned_at"] = d["scanned_at"].strftime("%Y-%m-%d %H:%M:%S")
         export_data["accessibility_defects"] = defects
-        
+
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(export_data, f, indent=2)
-            
+
         logger.info("[db_writer] Database exported to JSON: %s", output_path)
-        
+
     except Exception as exc:
         logger.error("[db_writer] Failed to export database to JSON: %s", exc)
     finally:
         cur.close()
         conn.close()
+
 
 def write_ui_defect(cfg: dict, defect: dict) -> None:
     """
@@ -347,18 +372,21 @@ def write_ui_defect(cfg: dict, defect: dict) -> None:
     conn = _get_connection(cfg)
     cur = conn.cursor()
     try:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO ui_defects
                 (file_id, defect_type, severity, element_type, trigger_text, expected_text)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, (
-            defect.get("file_id", 0),
-            defect.get("defect_type", ""),
-            defect.get("severity", ""),
-            defect.get("element_type", ""),
-            defect.get("trigger_text", ""),
-            defect.get("expected_text", ""),
-        ))
+        """,
+            (
+                defect.get("file_id", 0),
+                defect.get("defect_type", ""),
+                defect.get("severity", ""),
+                defect.get("element_type", ""),
+                defect.get("trigger_text", ""),
+                defect.get("expected_text", ""),
+            ),
+        )
         conn.commit()
     except Exception as exc:
         conn.rollback()
@@ -367,6 +395,7 @@ def write_ui_defect(cfg: dict, defect: dict) -> None:
         cur.close()
         conn.close()
 
+
 def write_accessibility_defect(cfg: dict, defect: dict) -> None:
     """
     Insert a single accessibility_defect into the MySQL database.
@@ -374,22 +403,25 @@ def write_accessibility_defect(cfg: dict, defect: dict) -> None:
     conn = _get_connection(cfg)
     cur = conn.cursor()
     try:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO accessibility_defects
                 (file_id, file_path, module, rule, defect_type, element, severity, line_number, confidence, scanned_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            defect.get("file_id", 0),
-            defect.get("file_path", ""),
-            defect.get("module", ""),
-            defect.get("rule", ""),
-            defect.get("defect_type", ""),
-            defect.get("element", ""),
-            defect.get("severity", ""),
-            defect.get("line_number", 0),
-            defect.get("confidence", "HIGH"),
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        ))
+        """,
+            (
+                defect.get("file_id", 0),
+                defect.get("file_path", ""),
+                defect.get("module", ""),
+                defect.get("rule", ""),
+                defect.get("defect_type", ""),
+                defect.get("element", ""),
+                defect.get("severity", ""),
+                defect.get("line_number", 0),
+                defect.get("confidence", "HIGH"),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
         conn.commit()
     except Exception as exc:
         conn.rollback()
