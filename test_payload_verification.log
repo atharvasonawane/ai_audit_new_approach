@@ -1,0 +1,17 @@
+# Payload Metrics Verification Log
+Date: 2026-04-24
+Status: 🟢 PASSED
+
+Verified that the payload metrics in Phase 1, Step 2 are correctly calculating non-zero values from the Vue AST.
+
+## Test Results:
+When analyzing a complex nested API payload, the pipeline correctly recorded:
+- payload_keys: > 10 (Triggered COMPLEX_PAYLOAD flag)
+- payload_depth: > 3 (Triggered DEEP_NESTED_PAYLOAD flag)
+- payload_size_kb: > 0.0
+
+These values replaced the hardcoded `0` defaults, verifying that the AST extraction logic correctly skips code-cleaning erasure and recursively counts object pair nodes.
+
+## Flags Triggered Successfully:
+- COMPLEX_PAYLOAD
+- DEEP_NESTED_PAYLOAD
