@@ -25,8 +25,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # ── Setup ────────────────────────────────────────────────────────────────────
-BASE        = Path(__file__).parent
-TASK2_BASE  = BASE / "task2_audit"
+BASE = Path(__file__).parent
+TASK2_BASE = BASE / "task2_audit"
 CONFIG_PATH = str(BASE / "config" / "project_config.yaml")
 
 # Insert task2_audit into sys.path so inner imports (extractors, db) resolve perfectly
@@ -35,20 +35,32 @@ sys.path.insert(0, str(TASK2_BASE))
 import yaml
 
 logging.basicConfig(
-    level   = logging.INFO,
-    format  = "%(asctime)s  %(levelname)-8s %(name)s -- %(message)s",
-    datefmt = "%H:%M:%S",
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s %(name)s -- %(message)s",
+    datefmt="%H:%M:%S",
 )
+
+file_handler = logging.FileHandler(str(BASE.parent / "scan.log"), encoding="utf-8")
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
+logging.getLogger().addHandler(file_handler)
+
 # Silence noisy sub-loggers during scan
-for noisy in ("extractors.vue_parser", "extractors.script_cleaner",
-              "extractors.api_extractor", "extractors.complexity_checker",
-              "extractors.template_extractor"):
+for noisy in (
+    "extractors.vue_parser",
+    "extractors.script_cleaner",
+    "extractors.api_extractor",
+    "extractors.complexity_checker",
+    "extractors.template_extractor",
+):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 
 logger = logging.getLogger("run_audit")
 
 # ── Load config ───────────────────────────────────────────────────────────────
-cfg      = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
+cfg = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
 
 # Dynamically set the module name. Priority:
 # 1. Explicit 'module' field in config (if set and non-empty)
@@ -69,11 +81,13 @@ if not cfg.get("module"):
 load_dotenv()
 if "db" not in cfg:
     cfg["db"] = {}
-cfg["db"]["host"]     = os.getenv("MYSQL_HOST", cfg["db"].get("host", "localhost"))
-cfg["db"]["port"]     = int(os.getenv("MYSQL_PORT", cfg["db"].get("port", 3306)))
-cfg["db"]["user"]     = os.getenv("MYSQL_USER", cfg["db"].get("user", "root"))
+cfg["db"]["host"] = os.getenv("MYSQL_HOST", cfg["db"].get("host", "localhost"))
+cfg["db"]["port"] = int(os.getenv("MYSQL_PORT", cfg["db"].get("port", 3306)))
+cfg["db"]["user"] = os.getenv("MYSQL_USER", cfg["db"].get("user", "root"))
 cfg["db"]["password"] = os.getenv("MYSQL_PASSWORD", cfg["db"].get("password", ""))
-cfg["db"]["database"] = os.getenv("MYSQL_DATABASE", cfg["db"].get("database", "code_audit_db"))
+cfg["db"]["database"] = os.getenv(
+    "MYSQL_DATABASE", cfg["db"].get("database", "code_audit_db")
+)
 
 BASE_PATH = cfg.get("base_path", "")
 
@@ -83,7 +97,8 @@ if not Path(BASE_PATH).exists():
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 from extractors.orchestrator import scan_all_vue_files
-from db.db_writer            import setup_schema, write_file_result, export_db_to_json
+from db.db_writer import setup_schema, write_file_result, export_db_to_json
+
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
@@ -113,7 +128,7 @@ def main():
         try:
             write_file_result(cfg, result)
         except Exception as e:
-            logger.error("DB write failed for %s: %s", result.get("file","?"), e)
+            logger.error("DB write failed for %s: %s", result.get("file", "?"), e)
             errors += 1
         if i % 20 == 0:
             logger.info("  Written %d / %d files...", i, len(results))
@@ -122,9 +137,9 @@ def main():
 
     # 5. Summary table
     total_flags = sum(r["flags_count"] for r in results)
-    ok          = [r for r in results if not r.get("error")]
-    flagged     = [r for r in ok if r["flags_count"] > 0]
-    clean       = [r for r in ok if r["flags_count"] == 0]
+    ok = [r for r in results if not r.get("error")]
+    flagged = [r for r in ok if r["flags_count"] > 0]
+    clean = [r for r in ok if r["flags_count"] == 0]
 
     # Top 10 most flagged files
     top10 = sorted(ok, key=lambda r: r["flags_count"], reverse=True)[:10]
@@ -145,16 +160,19 @@ def main():
     print("  " + "-" * 62)
     for r in top10:
         fname = Path(r["file"]).name
-        print(f"  {fname:<45} {r['flags_count']:>5}  {', '.join(r['flags_triggered'][:3])}{'...' if len(r['flags_triggered'])>3 else ''}")
+        print(
+            f"  {fname:<45} {r['flags_count']:>5}  {', '.join(r['flags_triggered'][:3])}{'...' if len(r['flags_triggered']) > 3 else ''}"
+        )
     print()
     print(f"  DB   : {cfg['db']['database']}.vue_files ({len(results)} rows)")
-    
+
     # NEW STEP: Extract UI elements (Task 4)
     # Placed here so db_writer.py export captures the new ui_extractions schema implicitly.
     try:
         if str(BASE / "task4") not in sys.path:
             sys.path.insert(0, str(BASE / "task4"))
         from task4_ui_extractor import main as task4_main
+
         print()
         print("=" * 65)
         print("  TASK 4: VUE UI EXTRACTION SCANNER")
@@ -168,10 +186,11 @@ def main():
     logger.info("Exporting native database tables to %s...", db_json_path)
     export_db_to_json(cfg, str(db_json_path))
     print(f"  DB Export : {db_json_path}")
-    
+
     # 7. Generate Task 3 Component Complexity JSON
     try:
         from task3.task3_exporter import main as task3_main
+
         print()
         print("=" * 65)
         print("  TASK 3: COMPONENT COMPLEXITY SCANNER")
@@ -179,12 +198,13 @@ def main():
         task3_main()
     except Exception as e:
         logger.error("Failed to run Task 3 exporter: %s", e)
-        
+
     # 8. Task 5 UI Consistency and Spell Checker
     try:
         if str(BASE / "task5") not in sys.path:
             sys.path.insert(0, str(BASE / "task5"))
         from task5.ui_consistency_checker import main as task5_main
+
         print()
         print("=" * 65)
         print("  TASK 5: UI CONSISTENCY & SPELL CHECKER")
@@ -192,12 +212,13 @@ def main():
         task5_main(cfg)
     except Exception as e:
         logger.error("Failed to run Task 5 checker: %s", e)
-        
+
     # 9. Task 6 UI Accessibility & Usability Compliance Checker
     try:
         if str(BASE / "task6") not in sys.path:
             sys.path.insert(0, str(BASE / "task6"))
         from task6.accessibility_checker import main as task6_main
+
         print()
         print("=" * 65)
         print("  TASK 6: UI ACCESSIBILITY CHECKER")
@@ -205,17 +226,19 @@ def main():
         task6_main(cfg)
     except Exception as e:
         logger.error("Failed to run Task 6 checker: %s", e)
-    
+
     # 10. Task 7 Unified Issue Detection Engine
     try:
         if str(BASE / "task7") not in sys.path:
             sys.path.insert(0, str(BASE / "task7"))
         import task7.issue_detector as task7_main
+
         task7_main.main(cfg)
     except Exception as e:
         logger.error("Failed to run Task 7 Issue Detector: %s", e)
-    
+
     # We remove the old final summary print here because task7.issue_detector handles it now.
+
 
 if __name__ == "__main__":
     main()

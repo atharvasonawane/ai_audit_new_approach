@@ -87,6 +87,13 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
         raw_script = parsed.get("script_text") or ""
         tmpl_node = parsed.get("template_node")
 
+        # Parse Validation Logging
+        raw_lines = len(source_bytes.splitlines())
+        if raw_lines > 30 and not raw_script.strip() and tmpl_node is None:
+            logger.warning(
+                "File %s has %d lines but parsed as empty", str(filepath), raw_lines
+            )
+
         # Step 2: Clean
         clean = clean_script(raw_script)
 
