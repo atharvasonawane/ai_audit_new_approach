@@ -36,6 +36,9 @@ _DDL = [
         max_nesting_depth INT DEFAULT 0,
         api_total     INT DEFAULT 0,
         api_mounted   INT DEFAULT 0,
+        payload_keys  INT DEFAULT 0,
+        payload_depth INT DEFAULT 0,
+        payload_size_kb FLOAT DEFAULT 0.0,
         flag_count    INT DEFAULT 0,
         confidence    VARCHAR(10),
         scanned_at    DATETIME,
@@ -227,8 +230,9 @@ def write_file_result(cfg: dict, result: dict) -> None:
             INSERT INTO vue_files
                 (file_path, module, script_lines, methods, computed, watchers,
                  template_lines, child_components, max_nesting_depth,
-                 api_total, api_mounted, flag_count, confidence, scanned_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 api_total, api_mounted, payload_keys, payload_depth, payload_size_kb,
+                 flag_count, confidence, scanned_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON DUPLICATE KEY UPDATE
                 module=VALUES(module),
                 script_lines=VALUES(script_lines), methods=VALUES(methods),
@@ -237,6 +241,8 @@ def write_file_result(cfg: dict, result: dict) -> None:
                 child_components=VALUES(child_components),
                 max_nesting_depth=VALUES(max_nesting_depth),
                 api_total=VALUES(api_total), api_mounted=VALUES(api_mounted),
+                payload_keys=VALUES(payload_keys), payload_depth=VALUES(payload_depth),
+                payload_size_kb=VALUES(payload_size_kb),
                 flag_count=VALUES(flag_count), confidence=VALUES(confidence),
                 scanned_at=VALUES(scanned_at)
         """,
@@ -252,6 +258,9 @@ def write_file_result(cfg: dict, result: dict) -> None:
                 metrics.get("max_nest_depth", 0),
                 metrics.get("api_total", 0),
                 metrics.get("api_in_mounted", 0),
+                metrics.get("payload_keys", 0),
+                metrics.get("payload_depth", 0),
+                metrics.get("payload_size_kb", 0.0),
                 len(flags),
                 conf,
                 now,
