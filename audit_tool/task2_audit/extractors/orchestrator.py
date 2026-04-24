@@ -36,12 +36,17 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
     if str(base) not in sys.path:
         sys.path.insert(0, str(base))
 
-    from extractors.vue_parser         import parse_vue_file
-    from extractors.script_cleaner     import clean_script
+    from extractors.vue_parser import parse_vue_file
+    from extractors.script_cleaner import clean_script
     from extractors.complexity_checker import check_complexity
     from extractors.template_extractor import extract_template_metrics
-    from extractors.api_extractor      import extract_api_calls
-    from checkers.flag_engine          import evaluate_flags, summarise_flags
+    from extractors.api_extractor import (
+        extract_api_calls,
+        count_payload_keys,
+        calculate_payload_depth,
+        calculate_payload_size_kb,
+    )
+    from checkers.flag_engine import evaluate_flags, summarise_flags
 
     # Use the dynamic module name from cfg (calculated in run_audit.py)
     module = cfg.get("module", "unknown")
@@ -49,24 +54,38 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
 
     # Default empty result
     empty = {
-        "file": filepath, "module": module, "confidence": confidence,
+        "file": filepath,
+        "module": module,
+        "confidence": confidence,
         "extracted_metrics": {
-            "script_lines": 0, "methods": 0, "computed": 0, "watchers": 0,
-            "api_total": 0, "api_in_mounted": 0, "api_duplicates": [],
-            "template_lines": 0, "child_components": 0, "max_nest_depth": 0,
-            "payload_keys": 0, "payload_depth": 0, "payload_size_kb": 0.0,
+            "script_lines": 0,
+            "methods": 0,
+            "computed": 0,
+            "watchers": 0,
+            "api_total": 0,
+            "api_in_mounted": 0,
+            "api_duplicates": [],
+            "template_lines": 0,
+            "child_components": 0,
+            "max_nest_depth": 0,
+            "payload_keys": 0,
+            "payload_depth": 0,
+            "payload_size_kb": 0.0,
         },
-        "api_calls": [], "flags_triggered": [], "flags_by_category": {},
-        "flags_count": 0, "error": None,
+        "api_calls": [],
+        "flags_triggered": [],
+        "flags_by_category": {},
+        "flags_count": 0,
+        "error": None,
     }
 
     try:
         # Step 1: Parse
         with open(filepath, "rb") as f:
             source_bytes = f.read()
-        parsed     = parse_vue_file(filepath)
+        parsed = parse_vue_file(filepath)
         raw_script = parsed.get("script_text") or ""
-        tmpl_node  = parsed.get("template_node")
+        tmpl_node = parsed.get("template_node")
 
         # Step 2: Clean
         clean = clean_script(raw_script)
@@ -80,47 +99,52 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
         # Step 5: API
         api_data = extract_api_calls(clean, raw_script, filepath, config_path)
 
+        # Calculate payload metrics
+        total_payload_keys = count_payload_keys(clean)
+        max_payload_depth = calculate_payload_depth(clean)
+        total_payload_size = calculate_payload_size_kb(clean)
+
         # Step 6: Flags
         flags = evaluate_flags(
-            lines             = complexity["lines"],
-            methods           = complexity["methods"],
-            computed          = complexity["computed"],
-            watchers          = complexity["watchers"],
-            api_calls         = api_data["calls"],
-            duplicate_names   = api_data["methods_with_same_name"],
-            template_lines    = template["template_lines"],
-            child_components  = template["child_components"],
-            max_nesting_depth = template["max_nesting_depth"],
-            payload_keys      = 0,
-            payload_depth     = 0,
-            payload_size_kb   = 0.0,
+            lines=complexity["lines"],
+            methods=complexity["methods"],
+            computed=complexity["computed"],
+            watchers=complexity["watchers"],
+            api_calls=api_data["calls"],
+            duplicate_names=api_data["methods_with_same_name"],
+            template_lines=template["template_lines"],
+            child_components=template["child_components"],
+            max_nesting_depth=template["max_nesting_depth"],
+            payload_keys=total_payload_keys,
+            payload_depth=max_payload_depth,
+            payload_size_kb=total_payload_size,
         )
         flag_summary = summarise_flags(flags)
 
         return {
-            "file"      : filepath,
-            "module"    : api_data.get("module") or module,
+            "file": filepath,
+            "module": api_data.get("module") or module,
             "confidence": confidence,
             "extracted_metrics": {
-                "script_lines"    : complexity["lines"],
-                "methods"         : complexity["methods"],
-                "computed"        : complexity["computed"],
-                "watchers"        : complexity["watchers"],
-                "api_total"       : api_data["total_count"],
-                "api_in_mounted"  : api_data["mounted_count"],
-                "api_duplicates"  : api_data["methods_with_same_name"],
-                "template_lines"  : template["template_lines"],
+                "script_lines": complexity["lines"],
+                "methods": complexity["methods"],
+                "computed": complexity["computed"],
+                "watchers": complexity["watchers"],
+                "api_total": api_data["total_count"],
+                "api_in_mounted": api_data["mounted_count"],
+                "api_duplicates": api_data["methods_with_same_name"],
+                "template_lines": template["template_lines"],
                 "child_components": template["child_components"],
-                "max_nest_depth"  : template["max_nesting_depth"],
-                "payload_keys"    : 0,
-                "payload_depth"   : 0,
-                "payload_size_kb" : 0.0,
+                "max_nest_depth": template["max_nesting_depth"],
+                "payload_keys": total_payload_keys,
+                "payload_depth": max_payload_depth,
+                "payload_size_kb": total_payload_size,
             },
-            "api_calls"         : api_data["calls"],
-            "flags_triggered"   : flags,
-            "flags_by_category" : flag_summary,
-            "flags_count"       : len(flags),
-            "error"             : None,
+            "api_calls": api_data["calls"],
+            "flags_triggered": flags,
+            "flags_by_category": flag_summary,
+            "flags_count": len(flags),
+            "error": None,
         }
 
     except Exception as exc:
@@ -145,14 +169,13 @@ def scan_all_vue_files(base_path: str, cfg: dict, config_path: str) -> list:
     from extractors.vue_parser import get_all_vue_files
 
     vue_files = get_all_vue_files(base_path)
-    total     = len(vue_files)
-    results   = []
+    total = len(vue_files)
+    results = []
 
     logger.info("[orchestrator] Found %d .vue files under '%s'.", total, base_path)
 
     for idx, filepath in enumerate(vue_files, 1):
-        logger.info("[orchestrator] [%d/%d] %s", idx, total,
-                    Path(filepath).name)
+        logger.info("[orchestrator] [%d/%d] %s", idx, total, Path(filepath).name)
         result = run_pipeline_on_file(filepath, cfg, config_path)
         results.append(result)
 

@@ -51,14 +51,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Node types to strip
 # ---------------------------------------------------------------------------
-COMMENT_NODE_TYPES: frozenset = frozenset({
-    "comment",          # // single-line  and  /* multi-line */
-})
+COMMENT_NODE_TYPES: frozenset = frozenset(
+    {
+        "comment",  # // single-line  and  /* multi-line */
+    }
+)
 
-STRING_NODE_TYPES: frozenset = frozenset({
-    "string",           # 'single' and "double" quoted literals
-    "template_string",  # `backtick template literals`
-})
+STRING_NODE_TYPES: frozenset = frozenset(
+    {
+        "string",  # 'single' and "double" quoted literals
+        "template_string",  # `backtick template literals`
+    }
+)
 
 STRIP_NODE_TYPES: frozenset = COMMENT_NODE_TYPES | STRING_NODE_TYPES
 
@@ -68,11 +72,12 @@ STRIP_NODE_TYPES: frozenset = COMMENT_NODE_TYPES | STRING_NODE_TYPES
 try:
     from tree_sitter import Parser
     from tree_sitter_language_pack import get_language as _get_ts_language
+
     _TS_AVAILABLE = True
-    _JS_LANGUAGE  = _get_ts_language("javascript")
+    _JS_LANGUAGE = _get_ts_language("javascript")
 except ImportError:
     _TS_AVAILABLE = False
-    _JS_LANGUAGE  = None
+    _JS_LANGUAGE = None
     logger.warning(
         "[script_cleaner] tree-sitter not installed. "
         "Run: pip install tree-sitter tree-sitter-language-pack"
@@ -82,6 +87,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def clean_script(raw_script_text: str) -> str:
     """
@@ -127,7 +133,7 @@ def clean_script(raw_script_text: str) -> str:
 
     try:
         parser = Parser(_JS_LANGUAGE)
-        tree   = parser.parse(source_bytes)
+        tree = parser.parse(source_bytes)
     except Exception as exc:
         logger.warning("[script_cleaner] Parse failed (%s). Returning raw text.", exc)
         return raw_script_text
@@ -148,7 +154,9 @@ def clean_script(raw_script_text: str) -> str:
 
     logger.debug(
         "[script_cleaner] Stripped %d region(s). Raw=%d, Cleaned=%d chars.",
-        len(intervals), len(raw_script_text), len(cleaned),
+        len(intervals),
+        len(raw_script_text),
+        len(cleaned),
     )
     return cleaned
 
@@ -167,60 +175,49 @@ def get_strip_node_types() -> frozenset:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _is_setactivity_string_arg(node, source_bytes: bytes) -> bool:
+
+def _is_preserved_string(node, source_bytes: bytes) -> bool:
     """
-    Return True if this string node is the direct argument to .setActivity().
+    Return True if this string node is inside an API call or an object structure.
 
-    In the Digital University codebase, MQL method names appear as:
-        new MQL().setActivity('o.[LoginCopy]')
-
-    tree-sitter AST shape:
-        call_expression
-          member_expression
-            property_identifier  = "setActivity"   <- function being called
-          arguments
-            string  'o.[LoginCopy]'                <- this is the node to keep
-
-    Checks:
-        1. node.parent is  arguments
-        2. node.parent.parent is  call_expression
-        3. The call_expression's function child is a member_expression
-           whose property_identifier text == "setActivity"
-
-    Args:
-        node        : A tree-sitter string node.
-        source_bytes: Original source bytes (to read identifier names).
-
-    Returns:
-        bool: True if this string should be preserved.
+    This preserves:
+      1. All strings inside object literals `{ ... }` (ensures JSON payloads survive)
+      2. All strings inside API function calls (`fetch`, `axios`, `$http`, `setData`)
+      3. The MQL string identifier inside `.setActivity(...)`
     """
-    parent = node.parent
-    if parent is None or parent.type != "arguments":
-        return False
+    curr = node.parent
+    while curr is not None:
+        # Don't look too far up the tree (e.g. past the current statement)
+        if curr.type in [
+            "expression_statement",
+            "variable_declarator",
+            "return_statement",
+        ]:
+            # We hit the boundary of the current statement.
+            pass
 
-    grandparent = parent.parent
-    if grandparent is None or grandparent.type != "call_expression":
-        return False
+        # 1. Inside an object literal (e.g., payload body)
+        if curr.type == "object":
+            return True
 
-    # Find the function node of the call_expression
-    function_node = grandparent.child_by_field_name("function")
-    if function_node is None:
-        for child in grandparent.children:
-            if child.type in ("member_expression", "identifier"):
-                function_node = child
-                break
+        # 2. Inside a function call, let's check its name
+        if curr.type == "call_expression":
+            func_node = curr.child_by_field_name("function")
+            if func_node is not None:
+                func_name = source_bytes[
+                    func_node.start_byte : func_node.end_byte
+                ].decode("utf-8", errors="replace")
+                valid_funcs = ["setActivity", "setData", "fetch", "axios", "$http"]
+                if any(v in func_name for v in valid_funcs):
+                    return True
 
-    if function_node is None or function_node.type != "member_expression":
-        return False
+        # Stop traversing up if we hit the block or statement edge
+        # This prevents it from thinking a random `let message = "Hello"`
+        # is inside the root object `{}` of the Vue component.
+        if curr.type == "method_definition" or curr.type == "function_declaration":
+            break
 
-    # Check property_identifier == "setActivity"
-    for child in function_node.children:
-        if child.type == "property_identifier":
-            prop_name = source_bytes[child.start_byte:child.end_byte].decode(
-                "utf-8", errors="replace"
-            )
-            if prop_name == "setActivity":
-                return True
+        curr = curr.parent
 
     return False
 
@@ -231,7 +228,7 @@ def _collect_strip_intervals(node, source_bytes: bytes, intervals: list) -> None
 
     - Comments are always stripped.
     - String/template literals are stripped UNLESS they are arguments
-      to a .setActivity() call (where MQL method names live).
+      to an API call or inside an object (so payloads survive).
     - ERROR nodes are traversed normally (MQL syntax causes these).
 
     Args:
@@ -246,12 +243,8 @@ def _collect_strip_intervals(node, source_bytes: bytes, intervals: list) -> None
         return
 
     if node_type in STRING_NODE_TYPES:
-        if _is_setactivity_string_arg(node, source_bytes):
-            logger.debug(
-                "[script_cleaner] Preserving setActivity arg: %s",
-                source_bytes[node.start_byte:node.end_byte][:60],
-            )
-            return  # keep — MQL name lives here
+        if _is_preserved_string(node, source_bytes):
+            return  # keep — Payload data or MQL string lives here
         intervals.append((node.start_byte, node.end_byte))
         return
 
