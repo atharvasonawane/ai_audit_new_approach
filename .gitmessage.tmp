@@ -1,0 +1,13 @@
+feat: implement actual API payload metric calculation
+
+- Add _get_api_payload_nodes() to find API payloads in AST
+- Add count_payload_keys() to count payload properties
+- Add calculate_payload_depth() to measure nesting depth
+- Add calculate_payload_size_kb() to measure payload size
+- Integrate functions into orchestrator.py
+- Replace hardcoded 0 values with actual calculations
+
+Before: All payload metrics returned 0 (unfinished feature)
+After: Payload metrics now accurately reflect complexity
+
+Fixes Phase 1, Step 2
