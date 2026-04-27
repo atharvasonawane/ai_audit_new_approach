@@ -34,26 +34,30 @@ eport_server.py) reads the aggregated JSON data and DB to present a visual healt
 
 ## 4. Project Structure
 * /audit_tool
-  * 
-un_audit.py → Top-level entry point orchestrator for the audit pipeline.
+  * run_audit.py → Top-level entry point orchestrator for the audit pipeline.
   * /config → Contains project_config.yaml with rules, target paths, and regex patterns.
-  * /report → Flask-based web dashboard (
-eport_server.py), storing static/ styling and 	emplates/ for the UI.
+  * /report → Flask-based web dashboard (report_server.py), storing static/ styling and templates/ for the UI.
   * /task2_audit → Base parsers and file extractors (Vue parser, API extractor, script cleaner).
-  * /task3 → Evaluates component complexities, line metrics, and file flags.
+    * extractors/api_extractor.py → Extracts API calls. Also contains count_payload_keys(), calculate_payload_depth(), and calculate_payload_size_kb() payload metric functions.
+    * extractors/script_cleaner.py → Cleans script for complexity analysis while preserving payload object structures for accurate metric extraction.
+  * /task3 → Evaluates component complexities, line metrics, and file flags. Exports component_complexity.json after each scan.
   * /task4 → UI component extraction logic.
   * /task5 → UI consistency checker (CSS styling rules, spell checking).
   * /task6 → Accessibility (a11y) defect checker.
   * /task7 → Consolidated issue detector aggregating findings across tasks into a comprehensive JSON report.
 * /code_analyzer_db → Database seeding, verification, and loading tools.
+* scan.log → Created at runtime in the project root. Captures INFO-level pipeline progress and WARNING-level parse validation errors per file.
 
 ## 5. Implemented Features
 * **Vue Code Parsing:** AST-based code breakdown for .vue files.
-* **API Extraction:** Detection and cataloging of generic REST, Axios, and internal API calls.
-* **Complexity Scoring:** Calculation of code complexity and measurement of large components/scripts.
+* **API Extraction:** Detection and cataloging of generic REST, Axios, and internal MQL API calls, including chain counting and request-chain detection.
+* **Complexity Scoring:** Calculation of code complexity and measurement of large components/scripts. Includes AST-first methods counting with regex brace-matching fallback.
+* **Payload Metrics:** Calculation and persistence of payload_keys, payload_depth, and payload_size_kb per file to the database.
 * **UI Consistency Check:** Identification of unstructured CSS usage and spelling defects within template structures.
-* **Accessibility Auditing:** Highlights semantic HTML errors, missing lt tags, and a11y non-compliance.
-* **Database Persistency:** Automatic synchronization of flags and file structures to a MySQL schema.
+* **Accessibility Auditing:** Highlights semantic HTML errors, missing alt tags, and a11y non-compliance.
+* **Database Persistency:** Automatic synchronization of flags and file structures to a MySQL schema using CREATE TABLE IF NOT EXISTS and INSERT ... ON DUPLICATE KEY UPDATE (no data loss on re-runs).
+* **Parse Validation Logging:** Files with unexpectedly empty parse results are logged as WARNING entries in scan.log.
+* **Task 3 MySQL Sync:** Component complexity data is exported from the database to component_complexity.json after each scan.
 * **Dashboard Report:** A local Flask web server offering visual health scoring, defect categorization, and file-level drill-downs.
 
 ## 6. Core Modules / Important Files
@@ -72,15 +76,47 @@ ender_template locally (/ route).
 
 ## 8. Database Schema
 * **Tables:**
-  * ue_files: Stores metadata, line counts, and paths of parsed codebase components.
-  * pi_calls: Tracks endpoint URLs, methods, and the originating component paths to trace network connections.
-  * ile_flags: Records defect categories, complexities, and specific issue details associated with scanned files.
-* **Relationships:** pi_calls and ile_flags are tied transactionally/relationally to their host components in ue_files.
+  * vue_files: Stores metadata, line counts, and paths of parsed codebase components. Columns include: script_lines, template_lines, methods, computed, watchers, api_total, api_mounted, child_components, max_nesting_depth, payload_keys, payload_depth, payload_size_kb, flag_count, confidence, scanned_at.
+  * api_calls: Tracks API type, method name, full match string, in_mounted flag, in_loop flag (for loop-context detection), and line_number per call.
+  * file_flags: Records defect categories and flag names associated with scanned files.
+  * ui_extractions, ui_defects, accessibility_defects: Store Task 4, 5, and 6 findings respectively.
+* **Relationships:** api_calls, file_flags, ui_extractions, ui_defects, and accessibility_defects are all foreign-keyed to vue_files(id) with ON DELETE CASCADE.
+* **Persistence strategy:** Tables use CREATE TABLE IF NOT EXISTS. Rows are upserted via INSERT ... ON DUPLICATE KEY UPDATE keyed on the unique file_path column, so re-running the audit updates existing rows without duplicating them.
 
 ## 9. Current Status
-* **What is completed:** Full end-to-end AST parsing, database insertion, and local defect evaluation (Tasks 2->7). The Flask reporting dashboard accurately displays aggregated UI metrics and a11y health scores.
-* **What is partially done:** DB loader verification scripts are modular but strictly dependent on the MySQL connection being manually provisioned.
-* **Known bugs or limitations:** Requires explicit configuration of tree-sitter binaries which might need recompilation on varying OS architectures. The file pathing relies heavily on static local directories defined in YAML.
+
+### PHASE 1 COMPLETION (Complete and Verified)
+* **Step 1 — DB Persistence:** Replaced DROP TABLE with CREATE TABLE IF NOT EXISTS. Upsert logic prevents duplicate rows on re-runs.
+* **Step 2 — Payload Metrics Persistence:** Implemented count_payload_keys(), calculate_payload_depth(), calculate_payload_size_kb() in api_extractor.py. Added payload_keys, payload_depth, payload_size_kb columns to vue_files schema and INSERT/UPDATE logic in db_writer.py.
+* **Step 3 — Parse Validation Logging:** Files with >30 raw lines that parse as empty are logged as WARNING in scan.log.
+* **Step 4 — Task 3 MySQL Sync:** task3_exporter.py reads from the DB export and generates component_complexity.json after each scan.
+
+### POST-PHASE 1 IMPROVEMENTS (Implemented and Verified)
+* API chain counting logic
+* Request-chain detection (axios, MQL)
+* MQL constructor chains
+* Mounted attribution (excluding promise callbacks)
+* Methods counting (AST-first)
+* Regex fallback for methods (brace matching)
+* Child component counting (template + script)
+* PrimeVue table exclusions
+* Registered components extraction
+* Template line counting logic
+
+### PARTIALLY DONE
+* DB loader verification scripts are modular but strictly dependent on the MySQL connection being manually provisioned.
+
+### KNOWN BUGS / LIMITATIONS
+* Requires explicit configuration of tree-sitter binaries which might need recompilation on varying OS architectures. File pathing relies on static local directories defined in YAML.
+* **[Note] script_lines undercounts raw file lines:** The script cleaner strips comments and blank lines before counting, so script_lines reflects cleaned line count, not raw physical line count.
+* **[Note] api_total undercounts loop-repeated calls:** The API extractor counts unique call patterns. APIs called inside loops (e.g., forEach with new MQL()) are counted as one pattern, not per iteration. The API_IN_LOOP flag captures this case separately.
+* **[Note] child_components misses lazy-loaded components:** Components registered via arrow-function import() syntax or mixins are not counted, resulting in undercounts.
+
+### READY FOR PHASE 2
+* Step 5 — (TBD)
+* Step 6 — (TBD)
+* Step 7 — (TBD)
+* Step 8 — (TBD)
 
 ## 10. Development Workflow
 * **How to run the project:** 
