@@ -101,7 +101,7 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
         complexity = check_complexity(raw_script)
 
         # Step 4: Template
-        template = extract_template_metrics(tmpl_node, source_bytes)
+        template = extract_template_metrics(tmpl_node, source_bytes, raw_script)
 
         # Step 5: API
         api_data = extract_api_calls(clean, raw_script, filepath, config_path)

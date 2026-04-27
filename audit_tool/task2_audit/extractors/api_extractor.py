@@ -2,7 +2,7 @@ import re
 import logging
 from collections import Counter
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import List, Dict, Any
 
 import yaml
 
@@ -19,28 +19,16 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Tree-Sitter Patterns (S-Expressions)
-# ---------------------------------------------------------------------------
-
-# 1. Fetch: Matches fetch(...)
-FETCH_QUERY = (
-    '(call_expression function: (identifier) @fn_name (#eq? @fn_name "fetch")) @call'
+# API regexes (one API call per full request-chain invocation)
+_AXIOS_CALL_RE = re.compile(
+    r"\baxios\s*\.\s*(get|post|put|delete|request)\s*\(", re.IGNORECASE
 )
-
-# 2. Axios: Matches axios(...)
-AXIOS_BASE_QUERY = (
-    '(call_expression function: (identifier) @fn_name (#eq? @fn_name "axios")) @call'
+_MQL_NEW_RE = re.compile(r"\bnew\s+MQL\s*\(", re.IGNORECASE)
+_MQL_FETCH_RE = re.compile(r"\.fetch\s*\(", re.IGNORECASE)
+_PROMISE_HANDLER_RE = re.compile(r"\.(then|catch|finally)\s*\(", re.IGNORECASE)
+_MQL_ACTIVITY_RE = re.compile(
+    r"\.setActivity\s*\(\s*['\"]([^'\"]+)['\"]\s*\)", re.IGNORECASE
 )
-
-# 3. Axios Methods: Matches axios.get(...) etc.
-AXIOS_METHOD_QUERY = '(call_expression function: (member_expression object: (identifier) @obj_name (#eq? @obj_name "axios"))) @call'
-
-# 4. $http: Matches this.$http(...)
-HTTP_BASE_QUERY = '(call_expression function: (member_expression object: (this) property: (property_identifier) @prop_name (#eq? @prop_name "$http"))) @call'
-
-# 5. $http Methods: Matches this.$http.get(...)
-HTTP_METHOD_QUERY = '(call_expression function: (member_expression object: (member_expression object: (this) property: (property_identifier) @prop_name (#eq? @prop_name "$http")))) @call'
 
 # ---------------------------------------------------------------------------
 # Config loader
@@ -69,127 +57,65 @@ def extract_api_calls(
     filepath: str,
     config_path: str,
 ) -> dict:
-    """Extract all API calls (MQL and Generic) using a Hybrid Tree-Sitter + Regex approach."""
+    """Extract API calls with one count per request chain (MQL fetch + axios methods)."""
     cfg = _load_config(config_path)
     module = cfg.get("module", "unknown")
 
-    mql_config = cfg.get("mql", {})
-    mql_pattern_str = mql_config.get(
-        "pattern", r'\.setActivity\s*\(\s*["\']([rso]\.\[([^\]]+)\])["\']\s*\)'
-    )
-
     calls: List[Dict[str, Any]] = []
 
-    # --- BLOCK DETECTION (Tree-Sitter Based) ---
-    mounted_ranges = []
-    loop_ranges = []
+    script_for_scan = cleaned_script_text if cleaned_script_text else raw_script_text
+    if not script_for_scan:
+        script_for_scan = ""
+    mounted_ranges = _find_mounted_ranges(script_for_scan)
+    promise_callback_ranges = _find_promise_callback_ranges(script_for_scan)
 
-    if _TS_AVAILABLE and JS_LANGUAGE and raw_script_text:
-        parser = Parser(JS_LANGUAGE)
-        tree = parser.parse(raw_script_text.encode("utf-8"))
-        root = tree.root_node
+    # axios.get|post|put|delete|request(...) is one API call each.
+    for match in _AXIOS_CALL_RE.finditer(script_for_scan):
+        call_line = _line_number_for_index(script_for_scan, match.start())
+        if _is_in_line_ranges(call_line, promise_callback_ranges):
+            continue
+        in_mounted = _is_in_line_ranges(call_line, mounted_ranges)
+        calls.append(
+            {
+                "type": "AXIOS",
+                "method": f"axios.{match.group(1).lower()}",
+                "full_match": match.group(0),
+                "in_mounted": in_mounted,
+                "in_loop": False,
+                "line_number": call_line,
+            }
+        )
 
-        # Walk the tree for blocks
-        def _walk_blocks(node):
-            # Check for mounted/created
-            # method_definition: mounted() {}
-            # pair: mounted: function() {} or mounted: () => {}
-            # function_declaration: function mounted() {} (unlikely in Vue but possible)
-            prop_name = ""
-            if node.type in ["method_definition", "pair", "function_declaration"]:
-                key_node = node.child_by_field_name("name") or node.child_by_field_name(
-                    "key"
-                )
-                if key_node:
-                    prop_name = key_node.text.decode("utf-8")
+    # MQL chain: count one request per new MQL() chain that reaches .fetch().
+    mql_starts = [m.start() for m in _MQL_NEW_RE.finditer(script_for_scan)]
+    for idx, chain_start in enumerate(mql_starts):
+        chain_end = (
+            mql_starts[idx + 1] if idx + 1 < len(mql_starts) else len(script_for_scan)
+        )
+        chain_text = script_for_scan[chain_start:chain_end]
 
-                if prop_name in ["mounted", "created"]:
-                    mounted_ranges.append((node.start_point[0], node.end_point[0]))
+        fetch_match = _MQL_FETCH_RE.search(chain_text)
+        if not fetch_match:
+            continue
 
-            # Check for loops
-            if node.type in [
-                "for_statement",
-                "for_in_statement",
-                "for_of_statement",
-                "while_statement",
-            ]:
-                loop_ranges.append((node.start_point[0], node.end_point[0]))
+        fetch_abs_idx = chain_start + fetch_match.start()
+        call_line = _line_number_for_index(script_for_scan, fetch_abs_idx)
+        if _is_in_line_ranges(call_line, promise_callback_ranges):
+            continue
 
-            # Check for array methods (forEach, map, filter)
-            if node.type == "call_expression":
-                fn = node.child_by_field_name("function")
-                if fn and fn.type == "member_expression":
-                    prop = fn.child_by_field_name("property")
-                    if prop and prop.text.decode("utf-8") in [
-                        "forEach",
-                        "map",
-                        "filter",
-                    ]:
-                        loop_ranges.append((node.start_point[0], node.end_point[0]))
-
-            for child in node.children:
-                _walk_blocks(child)
-
-        _walk_blocks(root)
-
-        # --- GENERIC API EXTRACTION (Tree-Sitter Based) ---
-        queries = [
-            ("fetch", FETCH_QUERY),
-            ("axios", AXIOS_BASE_QUERY),
-            ("axios", AXIOS_METHOD_QUERY),
-            ("$http", HTTP_BASE_QUERY),
-            ("$http", HTTP_METHOD_QUERY),
-        ]
-
-        for name, q_str in queries:
-            try:
-                # In tree-sitter 0.25.x (this user's version),
-                # QueryCursor.captures() returns a dict: {label: [nodes]}
-                query = Query(JS_LANGUAGE, q_str)
-                cursor = QueryCursor(query)
-                captures = cursor.captures(root)
-
-                if "call" in captures:
-                    for node in captures["call"]:
-                        line_idx = node.start_point[0]
-                        full_text = node.text.decode("utf-8")
-                        calls.append(
-                            {
-                                "type": "GENERIC",
-                                "method": name,
-                                "full_match": full_text.splitlines()[0][:100],
-                                "in_mounted": any(
-                                    s <= line_idx <= e for s, e in mounted_ranges
-                                ),
-                                "in_loop": any(
-                                    s <= line_idx <= e for s, e in loop_ranges
-                                ),
-                                "line_number": line_idx + 1,
-                            }
-                        )
-            except Exception as e:
-                logger.warning(
-                    "[api_extractor] Tree-Sitter query failed for %s: %s", name, e
-                )
-
-    # --- MQL EXTRACTION (Regex Based - Robust to non-standard syntax) ---
-    clean_lines = cleaned_script_text.splitlines()
-    mql_regex = re.compile(mql_pattern_str)
-
-    for line_idx, line in enumerate(clean_lines):
-        for match in mql_regex.finditer(line):
-            # If groups exist, group 1 is usually the 'o.[Method]' part
-            method_name = match.group(1) if match.groups() else match.group(0)
-            calls.append(
-                {
-                    "type": "MQL",
-                    "method": method_name,
-                    "full_match": match.group(0),
-                    "in_mounted": any(s <= line_idx <= e for s, e in mounted_ranges),
-                    "in_loop": any(s <= line_idx <= e for s, e in loop_ranges),
-                    "line_number": line_idx + 1,
-                }
-            )
+        activity_match = _MQL_ACTIVITY_RE.search(chain_text)
+        method_name = activity_match.group(1) if activity_match else "mql.fetch"
+        in_mounted = _is_in_line_ranges(call_line, mounted_ranges)
+        calls.append(
+            {
+                "type": "MQL",
+                "method": method_name,
+                "full_match": fetch_match.group(0),
+                "in_mounted": in_mounted,
+                "in_loop": False,
+                "line_number": call_line,
+            }
+        )
 
     total_count = len(calls)
     mounted_count = sum(1 for c in calls if c["in_mounted"])
@@ -238,6 +164,73 @@ def _get_api_payload_nodes(cleaned_script: str) -> list:
 
     walk(tree.root_node)
     return payload_nodes
+
+
+def _line_number_for_index(text: str, idx: int) -> int:
+    return text.count("\n", 0, idx) + 1
+
+
+def _is_in_line_ranges(line_number: int, ranges: List[tuple]) -> bool:
+    for start, end in ranges:
+        if start <= line_number <= end:
+            return True
+    return False
+
+
+def _extract_braced_block(text: str, open_brace_idx: int) -> tuple:
+    depth = 0
+    end_idx = -1
+    for i in range(open_brace_idx, len(text)):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end_idx = i
+                break
+    if end_idx < 0:
+        return ("", -1)
+    return (text[open_brace_idx : end_idx + 1], end_idx)
+
+
+def _find_mounted_ranges(script_text: str) -> List[tuple]:
+    ranges: List[tuple] = []
+    patterns = [
+        re.compile(r"\bmounted\s*\([^)]*\)\s*\{"),
+        re.compile(r"\bmounted\s*:\s*function\s*\([^)]*\)\s*\{"),
+        re.compile(r"\bmounted\s*:\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{"),
+    ]
+    for pattern in patterns:
+        for m in pattern.finditer(script_text):
+            open_brace = script_text.find("{", m.start())
+            if open_brace < 0:
+                continue
+            _, end_idx = _extract_braced_block(script_text, open_brace)
+            if end_idx < 0:
+                continue
+            start_line = _line_number_for_index(script_text, open_brace)
+            end_line = _line_number_for_index(script_text, end_idx)
+            ranges.append((start_line, end_line))
+    return ranges
+
+
+def _find_promise_callback_ranges(script_text: str) -> List[tuple]:
+    ranges: List[tuple] = []
+    for m in _PROMISE_HANDLER_RE.finditer(script_text):
+        open_paren = script_text.find("(", m.start())
+        if open_paren < 0:
+            continue
+        callback_open = script_text.find("{", open_paren)
+        if callback_open < 0:
+            continue
+        _, end_idx = _extract_braced_block(script_text, callback_open)
+        if end_idx < 0:
+            continue
+        start_line = _line_number_for_index(script_text, callback_open)
+        end_line = _line_number_for_index(script_text, end_idx)
+        ranges.append((start_line, end_line))
+    return ranges
 
 
 def count_payload_keys(cleaned_script: str) -> int:
