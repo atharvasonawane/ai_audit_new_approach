@@ -135,29 +135,39 @@ def evaluate_flags(
     if duplicate_names is None:
         duplicate_names = []
 
-    flags: set = set()
+    flags_list = []
+    flags_set = set()
+
+    def add_flag(name: str, line_number: Optional[int] = None):
+        if name not in flags_set:
+            flags_set.add(name)
+            flags_list.append({"flag": name, "line_number": line_number})
 
     # -----------------------------------------------------------------------
     # A. API-Related Flags
     # -----------------------------------------------------------------------
     total_api = len(api_calls)
-    mounted_api = sum(1 for c in api_calls if c.get("in_mounted", False))
+    mounted_calls = [c for c in api_calls if c.get("in_mounted", False)]
+    mounted_api = len(mounted_calls)
+    
+    first_api_line = api_calls[0].get("line_number") if api_calls else None
+    first_mounted_line = mounted_calls[0].get("line_number") if mounted_calls else None
 
     if total_api >= API_HIGH:
         # Condition: API calls >= 3
-        flags.add("HIGH_API_USAGE")
+        add_flag("HIGH_API_USAGE", first_api_line)
 
     if total_api >= API_VERY_HIGH:
         # Condition: API calls >= 5
-        flags.add("VERY_HIGH_API_USAGE")
+        add_flag("VERY_HIGH_API_USAGE", first_api_line)
 
     if total_api >= API_EXCESSIVE:
         # Condition: API calls >= 8
-        flags.add("EXCESSIVE_API_USAGE")
+        add_flag("EXCESSIVE_API_USAGE", first_api_line)
 
     if mounted_api >= API_MOUNTED:
         # Condition: API calls in mounted() >= 3
-        flags.add("HEAVY_MOUNTED_API")
+        add_flag("HEAVY_MOUNTED_API", first_mounted_line)
 
     logger.debug("[flag_engine] API: total=%d, mounted=%d", total_api, mounted_api)
 
@@ -166,19 +176,19 @@ def evaluate_flags(
     # -----------------------------------------------------------------------
     if payload_keys > PAYLOAD_COMPLEX:
         # Condition: Payload keys > 10
-        flags.add("COMPLEX_PAYLOAD")
+        add_flag("COMPLEX_PAYLOAD", None)
 
     if payload_keys > PAYLOAD_VERY_COMPLEX:
         # Condition: Payload keys > 20
-        flags.add("VERY_COMPLEX_PAYLOAD")
+        add_flag("VERY_COMPLEX_PAYLOAD", None)
 
     if payload_depth > PAYLOAD_DEEP_NEST:
         # Condition: Nested payload depth > 3
-        flags.add("DEEP_NESTED_PAYLOAD")
+        add_flag("DEEP_NESTED_PAYLOAD", None)
 
     if payload_size_kb > PAYLOAD_LARGE_KB:
         # Condition: Payload size > 1 MB (estimated as KB)
-        flags.add("LARGE_PAYLOAD")
+        add_flag("LARGE_PAYLOAD", None)
 
     logger.debug(
         "[flag_engine] Payload: keys=%d, depth=%d, size_kb=%.1f",
@@ -190,19 +200,19 @@ def evaluate_flags(
     # -----------------------------------------------------------------------
     if lines > LINES_LARGE:
         # Condition: Lines of code > 500
-        flags.add("LARGE_COMPONENT")
+        add_flag("LARGE_COMPONENT", None)
 
     if methods > METHODS_MANY:
         # Condition: Methods count > 15
-        flags.add("MANY_METHODS")
+        add_flag("MANY_METHODS", None)
 
     if computed > COMPUTED_MANY:
         # Condition: Computed properties > 10
-        flags.add("MANY_COMPUTED")
+        add_flag("MANY_COMPUTED", None)
 
     if watchers > WATCHERS_MANY:
         # Condition: Watchers > 5
-        flags.add("MANY_WATCHERS")
+        add_flag("MANY_WATCHERS", None)
 
     logger.debug(
         "[flag_engine] Component: lines=%d, methods=%d, computed=%d, watchers=%d",
@@ -213,56 +223,59 @@ def evaluate_flags(
     # E. Specific Pattern Flags
     # (evaluated before D so combined rules can reference E results)
     # -----------------------------------------------------------------------
-    if any(c.get("in_loop", False) for c in api_calls):
+    loop_calls = [c for c in api_calls if c.get("in_loop", False)]
+    if loop_calls:
         # Condition: API calls in loops
-        flags.add("API_IN_LOOP")
+        add_flag("API_IN_LOOP", loop_calls[0].get("line_number"))
 
     # API_CHAINING: multiple .setActivity calls chained in immediate sequence.
     # Heuristic: any two calls whose line numbers are within 5 lines of each other
     # (tight chains as seen in MQL builder pattern).
     call_lines = sorted(c.get("line_number", 0) for c in api_calls)
-    chain_found = False
+    chain_line = None
     for i in range(len(call_lines) - 1):
         if call_lines[i + 1] - call_lines[i] <= 5:
-            chain_found = True
+            chain_line = call_lines[i]
             break
-    if chain_found:
+    if chain_line is not None:
         # Condition: Multiple API calls in sequence (chain)
-        flags.add("API_CHAINING")
+        add_flag("API_CHAINING", chain_line)
 
     # DEPENDENT_API_CALLS: calls where one result feeds into the next.
     # Heuristic: look for .then(rs => { ... .setActivity( on the next call.
     # We detect this by checking if any consecutive pair has in_mounted=False
     # and their lines are within 20 of each other (nested .then() chain pattern).
-    dependent_found = False
+    dependent_line = None
     sorted_calls = sorted(api_calls, key=lambda c: c.get("line_number", 0))
     for i in range(len(sorted_calls) - 1):
         gap = sorted_calls[i + 1].get("line_number", 0) - sorted_calls[i].get("line_number", 0)
         if 1 <= gap <= 20:
-            dependent_found = True
+            dependent_line = sorted_calls[i].get("line_number")
             break
-    if dependent_found:
+    if dependent_line is not None:
         # Condition: API calls depending on each other's results
-        flags.add("DEPENDENT_API_CALLS")
+        add_flag("DEPENDENT_API_CALLS", dependent_line)
 
     if duplicate_names:
+        dup_calls = [c for c in api_calls if c.get("method") in duplicate_names]
+        dup_line = dup_calls[0].get("line_number") if dup_calls else None
         # Condition: Same API called multiple times
-        flags.add("DUPLICATE_API_CALLS")
+        add_flag("DUPLICATE_API_CALLS", dup_line)
 
     # -----------------------------------------------------------------------
     # F. Template / UI Complexity Flags
     # -----------------------------------------------------------------------
     if template_lines > TEMPLATE_COMPLEX:
         # Condition: Template lines > 200
-        flags.add("COMPLEX_TEMPLATE")
+        add_flag("COMPLEX_TEMPLATE", None)
 
     if max_nesting_depth > TEMPLATE_DEEP_NEST:
         # Condition: v-if/v-for nesting depth > 3
-        flags.add("DEEP_NESTED_TEMPLATE")
+        add_flag("DEEP_NESTED_TEMPLATE", None)
 
     if child_components > CHILDREN_MANY:
         # Condition: Component has > 5 child components
-        flags.add("MANY_CHILDREN")
+        add_flag("MANY_CHILDREN", None)
 
     logger.debug(
         "[flag_engine] Template: lines=%d, children=%d, max_depth=%d",
@@ -275,24 +288,24 @@ def evaluate_flags(
     # -----------------------------------------------------------------------
 
     # Condition: HIGH_API_USAGE + COMPLEX_PAYLOAD
-    if "HIGH_API_USAGE" in flags and "COMPLEX_PAYLOAD" in flags:
-        flags.add("HIGH_RISK_COMPONENT")
+    if "HIGH_API_USAGE" in flags_set and "COMPLEX_PAYLOAD" in flags_set:
+        add_flag("HIGH_RISK_COMPONENT", None)
 
     # Condition: VERY_HIGH_API_USAGE + VERY_COMPLEX_PAYLOAD
-    if "VERY_HIGH_API_USAGE" in flags and "VERY_COMPLEX_PAYLOAD" in flags:
-        flags.add("CRITICAL_COMPONENT")
+    if "VERY_HIGH_API_USAGE" in flags_set and "VERY_COMPLEX_PAYLOAD" in flags_set:
+        add_flag("CRITICAL_COMPONENT", None)
 
     # Condition: HIGH_API_USAGE + LARGE_COMPONENT
-    if "HIGH_API_USAGE" in flags and "LARGE_COMPONENT" in flags:
-        flags.add("HEAVY_COMPONENT")
+    if "HIGH_API_USAGE" in flags_set and "LARGE_COMPONENT" in flags_set:
+        add_flag("HEAVY_COMPONENT", None)
 
     # Condition: EXCESSIVE_API_USAGE + VERY_COMPLEX_PAYLOAD + LARGE_COMPONENT
     if (
-        "EXCESSIVE_API_USAGE"  in flags and
-        "VERY_COMPLEX_PAYLOAD" in flags and
-        "LARGE_COMPONENT"      in flags
+        "EXCESSIVE_API_USAGE"  in flags_set and
+        "VERY_COMPLEX_PAYLOAD" in flags_set and
+        "LARGE_COMPONENT"      in flags_set
     ):
-        flags.add("MONOLITH_COMPONENT")
+        add_flag("MONOLITH_COMPONENT", None)
 
     # Condition: Any 3+ flags from different categories
     category_flags = {
@@ -308,23 +321,23 @@ def evaluate_flags(
     }
     triggered_categories = sum(
         1 for cat_flags in category_flags.values()
-        if flags & cat_flags   # at least one flag from this category is set
+        if flags_set & cat_flags   # at least one flag from this category is set
     )
     if triggered_categories >= CROSS_CATEGORY_THRESHOLD:
         # Condition: Any 3+ flags from different categories
-        flags.add("COMPLEX_HEAVY_COMPONENT")
+        add_flag("COMPLEX_HEAVY_COMPONENT", None)
 
     # Condition: All flags from API, Payload, and Component categories triggered
-    api_full      = category_flags["API"]      <= flags
-    payload_full  = category_flags["PAYLOAD"]  <= flags
-    component_full= category_flags["COMPONENT"]<= flags
+    api_full      = category_flags["API"]      <= flags_set
+    payload_full  = category_flags["PAYLOAD"]  <= flags_set
+    component_full= category_flags["COMPONENT"]<= flags_set
     if api_full and payload_full and component_full:
-        flags.add("ARCHITECTURE_CONCERN")
+        add_flag("ARCHITECTURE_CONCERN", None)
 
-    result = sorted(flags)
+    result = sorted(flags_list, key=lambda x: x["flag"])
     logger.info(
-        "[flag_engine] Evaluation complete: %d flag(s) triggered: %s",
-        len(result), result
+        "[flag_engine] Evaluation complete: %d flag(s) triggered",
+        len(result)
     )
     return result
 
@@ -358,9 +371,9 @@ def summarise_flags(flags: list) -> dict:
                       "DUPLICATE_API_CALLS"},
         "TEMPLATE":  {"COMPLEX_TEMPLATE", "DEEP_NESTED_TEMPLATE", "MANY_CHILDREN"},
     }
-    flag_set = set(flags)
+    flag_set = set(f["flag"] if isinstance(f, dict) else f for f in flags)
     return {
-        cat: sorted(flag_set & cat_flags)
+        cat: sorted(list(flag_set & cat_flags))
         for cat, cat_flags in category_map.items()
     }
 
@@ -378,7 +391,7 @@ if __name__ == "__main__":
 
     def check(label, flags, expected_present=(), expected_absent=()):
         """Helper: assert flags contain all expected_present and none of expected_absent."""
-        flag_set = set(flags)
+        flag_set = set(f["flag"] if isinstance(f, dict) else f for f in flags)
         ok = True
         missing  = [f for f in expected_present if f not in flag_set]
         extra    = [f for f in expected_absent  if f in flag_set]

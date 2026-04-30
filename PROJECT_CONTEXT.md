@@ -113,10 +113,10 @@ ender_template locally (/ route).
 * **[Note] child_components misses lazy-loaded components:** Components registered via arrow-function import() syntax or mixins are not counted, resulting in undercounts.
 
 ### READY FOR PHASE 2
-* Step 5 — (TBD)
-* Step 6 — (TBD)
-* Step 7 — (TBD)
-* Step 8 — (TBD)
+* Step 5 — Handle Vue SFC edge cases (<script setup>, template-only, TypeScript)
+* Step 6 — Add line numbers to all findings (api_calls and file_flags tables)
+* Step 7 — Add code snippets to flags (1-3 line evidence)
+* Step 8 — Expand API detection (service classes, composables, Vuex)
 
 ## 10. Development Workflow
 * **How to run the project:** 

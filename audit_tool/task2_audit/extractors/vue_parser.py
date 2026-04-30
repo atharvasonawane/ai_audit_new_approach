@@ -127,6 +127,7 @@ def parse_vue_file(filepath: str) -> dict:
         "style_text": None,
         "is_script_setup": False,
         "script_lang": None,
+        "script_start_line": None,
     }
 
     # --- Guard: tree-sitter must be available ---
@@ -198,6 +199,7 @@ def parse_vue_file(filepath: str) -> dict:
             else:
                 script_text = _extract_block_text(child, source_bytes, "script", filepath)
                 result["script_text"] = script_text
+                result["script_start_line"] = getattr(child, "start_point", (0, 0))[0] + 1
 
                 # Detect <script setup> and <script lang="ts">
                 # The start_tag children contain attribute nodes
@@ -228,7 +230,10 @@ def parse_vue_file(filepath: str) -> dict:
     if result["template_node"] is None:
         logger.warning("[vue_parser] No <template> block found in '%s'.", filepath)
     if result["script_text"] is None:
-        logger.warning("[vue_parser] No <script> block found in '%s'.", filepath)
+        if result["template_node"] is not None:
+            logger.debug("[vue_parser] No <script> block found in '%s' (template-only).", filepath)
+        else:
+            logger.warning("[vue_parser] No <script> block found in '%s'.", filepath)
     if result["style_text"] is None:
         logger.debug("[vue_parser] No <style> block found in '%s' (may be normal).", filepath)
 

@@ -65,18 +65,73 @@ except ImportError:
     _JS_LANGUAGE = None
     logger.warning("[complexity_checker] tree-sitter not installed.")
 
+# ---------------------------------------------------------------------------
+# TypeScript Syntax Stripper
+# ---------------------------------------------------------------------------
+
+def _regex_strip_braced_block(text: str, prefix_pattern: str) -> str:
+    res = text
+    while True:
+        match = re.search(prefix_pattern, res)
+        if not match:
+            break
+        start = match.end() - 1  # position of the opening {
+        depth = 0
+        end = -1
+        for i in range(start, len(res)):
+            if res[i] == '{':
+                depth += 1
+            elif res[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end != -1:
+            res = res[:match.start()] + res[end+1:]
+        else:
+            break
+    return res
+
+def _strip_typescript_syntax(script_text: str) -> str:
+    """
+    Remove TypeScript annotations before JS tools parse it.
+    """
+    if not script_text:
+        return ""
+    text = script_text
+
+    # Remove interface X { ... } and type X = { ... }
+    text = _regex_strip_braced_block(text, r'\binterface\s+\w+\s*\{')
+    text = _regex_strip_braced_block(text, r'\btype\s+\w+\s*=\s*\{')
+
+    # Remove simple type aliases (e.g. type Status = string;)
+    text = re.sub(r'\btype\s+\w+\s*=[^;{]+;', '', text)
+
+    # Remove <Generic> syntax (e.g. ref<string>, defineProps<{...}>) 
+    # Be careful not to remove less-than logic.
+    text = re.sub(r'<\s*[A-Za-z_]\w*(?:\[\])?\s*>', '', text)
+
+    # Remove 'as Type' or 'as const' casts
+    text = re.sub(r'\bas\s+[A-Za-z_]\w*', '', text)
+
+    # Remove ': Type' annotations from parameters and returns
+    text = re.sub(r':\s*[A-Za-z_]\w*(?:\[\])?', '', text)
+
+    return text
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def check_complexity(script_text: str) -> dict:
+def check_complexity(script_text: str, is_script_setup: bool = False, script_lang: str = None) -> dict:
     """
     Count complexity metrics from raw <script> block text.
 
     Args:
         script_text (str): Raw script text from vue_parser.parse_vue_file().
+        is_script_setup (bool): True if <script setup> is used.
+        script_lang (str): "ts" if TypeScript is used.
 
     Returns:
         dict with keys:
@@ -85,12 +140,40 @@ def check_complexity(script_text: str) -> dict:
             computed (int): Computed properties in computed: {}.
             watchers (int): Watcher definitions in watch: {}.
     """
-    if not script_text:
+    if not script_text or not script_text.strip():
+        # Handles empty script or template-only gracefully
         return {"lines": 0, "methods": 0, "computed": 0, "watchers": 0}
 
     # 1. Line count — straightforward
     lines = sum(1 for l in script_text.splitlines() if l.strip())
 
+    # Pre-processing for TypeScript
+    if script_lang == "ts":
+        script_text = _strip_typescript_syntax(script_text)
+
+    # Setup extraction flow (Composition API)
+    if is_script_setup:
+        if _TS_AVAILABLE and _JS_LANGUAGE:
+            source_bytes = script_text.encode("utf-8", errors="replace")
+            try:
+                parser = Parser(_JS_LANGUAGE)
+                tree = parser.parse(source_bytes)
+                root = tree.root_node
+                comp_m, comp_c, comp_w = _count_composition_api(root, source_bytes)
+                return {
+                    "lines": lines,
+                    "methods": comp_m,
+                    "computed": comp_c,
+                    "watchers": comp_w,
+                }
+            except Exception as exc:
+                logger.warning(
+                    "[complexity_checker] AST setup walk failed (%s); returning zeros.",
+                    exc,
+                )
+        return {"lines": lines, "methods": 0, "computed": 0, "watchers": 0}
+
+    # Standard Options API extraction flow
     # 2. Parse methods:{} directly from script text (robust to AST ERROR nodes)
     methods = _count_methods_from_methods_block(script_text)
 
@@ -117,22 +200,6 @@ def check_complexity(script_text: str) -> dict:
                 watchers,
             )
 
-            # If Options API found nothing, try Composition API counting.
-            # In <script setup> or defineComponent({ setup() {...} }), there's
-            # no methods/computed/watch object — instead they use function calls.
-            if computed == 0 and watchers == 0:
-                comp_m, comp_c, comp_w = _count_composition_api(root, source_bytes)
-                if comp_c > 0 or comp_w > 0:
-                    if methods == 0:
-                        methods = comp_m
-                    computed = comp_c
-                    watchers = comp_w
-                    logger.debug(
-                        "[complexity_checker] AST (Composition API): methods=%d computed=%d watchers=%d",
-                        methods,
-                        computed,
-                        watchers,
-                    )
         except Exception as exc:
             logger.warning(
                 "[complexity_checker] AST walk failed (%s); using regex.", exc

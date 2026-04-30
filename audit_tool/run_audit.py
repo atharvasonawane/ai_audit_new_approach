@@ -160,8 +160,9 @@ def main():
     print("  " + "-" * 62)
     for r in top10:
         fname = Path(r["file"]).name
+        flag_names = [f["flag"] if isinstance(f, dict) else f for f in r['flags_triggered']]
         print(
-            f"  {fname:<45} {r['flags_count']:>5}  {', '.join(r['flags_triggered'][:3])}{'...' if len(r['flags_triggered']) > 3 else ''}"
+            f"  {fname:<45} {r['flags_count']:>5}  {', '.join(flag_names[:3])}{'...' if len(flag_names) > 3 else ''}"
         )
     print()
     print(f"  DB   : {cfg['db']['database']}.vue_files ({len(results)} rows)")

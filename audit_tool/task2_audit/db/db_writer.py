@@ -64,6 +64,7 @@ _DDL = [
         file_id   INT NOT NULL,
         flag_name VARCHAR(100),
         category  VARCHAR(50),
+        line_number INT DEFAULT 0,
         FOREIGN KEY (file_id) REFERENCES vue_files(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
@@ -185,6 +186,14 @@ def setup_schema(cfg: dict) -> None:
     for ddl in _DDL:
         cur.execute(ddl)
 
+    # Safe alter table for file_flags
+    try:
+        cur.execute("ALTER TABLE file_flags ADD COLUMN line_number INT DEFAULT 0")
+    except mysql.connector.Error as e:
+        # Error 1060: Duplicate column name
+        if e.errno != 1060:
+            logger.warning("[db_writer] Failed to alter file_flags table: %s", e)
+
     conn.commit()
     conn.close()
     logger.info(
@@ -292,14 +301,20 @@ def write_file_result(cfg: dict, result: dict) -> None:
             )
 
         # ── 4. file_flags ─────────────────────────────────────────────────
-        for flag in flags:
+        for flag_obj in flags:
+            if isinstance(flag_obj, dict):
+                flag = flag_obj["flag"]
+                line = flag_obj.get("line_number")
+            else:
+                flag = flag_obj
+                line = None
             category = _FLAG_CATEGORY.get(flag, "OTHER")
             cur.execute(
                 """
-                INSERT INTO file_flags (file_id, flag_name, category)
-                VALUES (%s,%s,%s)
+                INSERT INTO file_flags (file_id, flag_name, category, line_number)
+                VALUES (%s,%s,%s,%s)
             """,
-                (file_id, flag, category),
+                (file_id, flag, category, line or 0),
             )
 
         conn.commit()

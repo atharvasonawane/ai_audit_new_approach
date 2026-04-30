@@ -56,6 +56,7 @@ def extract_api_calls(
     raw_script_text: str,
     filepath: str,
     config_path: str,
+    script_start_line: int = 1,
 ) -> dict:
     """Extract API calls with one count per request chain (MQL fetch + axios methods)."""
     cfg = _load_config(config_path)
@@ -82,7 +83,7 @@ def extract_api_calls(
                 "full_match": match.group(0),
                 "in_mounted": in_mounted,
                 "in_loop": False,
-                "line_number": call_line,
+                "line_number": call_line + script_start_line - 1,
             }
         )
 
@@ -113,7 +114,7 @@ def extract_api_calls(
                 "full_match": fetch_match.group(0),
                 "in_mounted": in_mounted,
                 "in_loop": False,
-                "line_number": call_line,
+                "line_number": call_line + script_start_line - 1,
             }
         )
 

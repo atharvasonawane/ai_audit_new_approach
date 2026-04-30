@@ -98,13 +98,18 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
         clean = clean_script(raw_script)
 
         # Step 3: Complexity
-        complexity = check_complexity(raw_script)
+        complexity = check_complexity(
+            script_text=raw_script,
+            is_script_setup=parsed.get("is_script_setup", False),
+            script_lang=parsed.get("script_lang")
+        )
 
         # Step 4: Template
         template = extract_template_metrics(tmpl_node, source_bytes, raw_script)
 
         # Step 5: API
-        api_data = extract_api_calls(clean, raw_script, filepath, config_path)
+        script_start_line = parsed.get("script_start_line") or 1
+        api_data = extract_api_calls(clean, raw_script, filepath, config_path, script_start_line)
 
         # Calculate payload metrics
         total_payload_keys = count_payload_keys(clean)
