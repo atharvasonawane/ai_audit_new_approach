@@ -112,9 +112,24 @@ ender_template locally (/ route).
 * **[Note] api_total undercounts loop-repeated calls:** The API extractor counts unique call patterns. APIs called inside loops (e.g., forEach with new MQL()) are counted as one pattern, not per iteration. The API_IN_LOOP flag captures this case separately.
 * **[Note] child_components misses lazy-loaded components:** Components registered via arrow-function import() syntax or mixins are not counted, resulting in undercounts.
 
-### READY FOR PHASE 2
-* Step 5 — Handle Vue SFC edge cases (<script setup>, template-only, TypeScript)
-* Step 6 — Add line numbers to all findings (api_calls and file_flags tables)
+### PHASE 2 PROGRESS (In Progress)
+
+#### Completed:
+* **Step 5 — Handle Vue SFC edge cases:**
+  - `<script setup>` detection & method counting
+  - Template-only component detection (no false parse warnings)
+  - TypeScript syntax stripping before JS counters
+  - 3 new schema columns: `script_setup`, `template_only`, `typescript_detected` (Added dynamically in task schema handling)
+  - Verified on 114-file codebase
+
+* **Step 6 — Add line numbers to findings:**
+  - Line number calculation for API calls (relative to whole file)
+  - Line number calculation for pattern-based flags
+  - Structural flags use line_number = 0
+  - Includes line numbers in JSON exports
+  - Note: Precision acceptable, not 100% exact for all edge cases
+
+### READY FOR NEXT STEPS (Phase 2)
 * Step 7 — Add code snippets to flags (1-3 line evidence)
 * Step 8 — Expand API detection (service classes, composables, Vuex)
 
