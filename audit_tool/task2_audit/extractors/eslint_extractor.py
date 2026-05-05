@@ -4,34 +4,55 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 
-def run_eslint_scan(target_dir: str) -> bool:
+def run_eslint_scan(target_dir: str, dirty_files: List[str] = None) -> bool:
     """
-    Run ESLint scan on the target directory and generate a JSON report.
+    Run ESLint scan on target directory and generate a JSON report.
+    Can target specific files (dirty_files) or entire directory.
     
     Args:
-        target_dir: Path to the directory to scan
+        target_dir: Path to directory to scan
+        dirty_files: List of specific file paths to scan (for incremental auditing)
         
     Returns:
-        True if the scan completed successfully and report was generated, False otherwise
+        True if scan completed successfully and report was generated, False otherwise
     """
     try:
         # Get the audit_tool directory
         audit_tool_dir = Path(__file__).parent.parent.parent
         
-        # Run ESLint command using local eslint executable
-        # Use --no-eslintrc to ignore the target project's config
-        # Use --config to force our audit_tool .eslintrc.js so we only get
-        # Vue best-practice and accessibility errors, not stylistic noise.
-        result = subprocess.run(
-            [
-                str(audit_tool_dir / "node_modules" / ".bin" / "eslint.cmd"),
+        # Build ESLint command
+        cmd = [
+            str(audit_tool_dir / "node_modules" / ".bin" / "eslint.cmd"),
+            "--no-eslintrc",
+            "--config", str(audit_tool_dir / ".eslintrc.js"),
+            "--format", "json",
+            "-o", "eslint_report.json"
+        ]
+        
+        # If dirty_files is provided, scan only those files
+        # Otherwise, scan the entire directory
+        if dirty_files:
+            # Filter to only .vue and .js files from dirty_files
+            target_files = []
+            for file_path in dirty_files:
+                file_path = Path(file_path)
+                if file_path.suffix in ['.vue', '.js']:
+                    target_files.append(str(file_path))
+            
+            if not target_files:
+                # No .vue/.js files in dirty_files, nothing to scan
+                return True
+                
+            cmd.extend(target_files)
+        else:
+            # Scan entire directory (original behavior)
+            cmd.extend([
                 target_dir,
-                "--no-eslintrc",
-                "--config", str(audit_tool_dir / ".eslintrc.js"),
-                "--ext", ".vue,.js",
-                "--format", "json",
-                "-o", "eslint_report.json"
-            ],
+                "--ext", ".vue,.js"
+            ])
+        
+        result = subprocess.run(
+            cmd,
             capture_output=True,
             text=True,
             cwd=audit_tool_dir

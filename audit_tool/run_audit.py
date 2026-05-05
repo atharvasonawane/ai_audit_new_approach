@@ -115,64 +115,81 @@ def main():
     logger.info("Setting up database schema...")
     setup_schema(cfg)
 
-    # 2. Scan all files
+    # 2. Scan all files (with incremental auditing)
     start = time.time()
-    logger.info("Starting scan...")
-    results = scan_all_vue_files(BASE_PATH, cfg, CONFIG_PATH)
+    logger.info("Starting incremental scan...")
+    results, dirty_files = scan_all_vue_files(BASE_PATH, cfg, CONFIG_PATH)
     elapsed = time.time() - start
-    logger.info("Scan complete in %.1fs — %d files processed.", elapsed, len(results))
+    logger.info("Incremental scan complete in %.1fs — %d files found, %d processed.", elapsed, len(results), len(dirty_files))
 
-    # 3. Write to DB
-    logger.info("Writing results to MySQL...")
+    # 3. Write to DB (only dirty files)
+    logger.info("Writing dirty file results to MySQL...")
     errors = 0
+    written_count = 0
     for i, result in enumerate(results, 1):
+        # Skip files that were unchanged (already in DB)
+        if result.get("skipped"):
+            continue
+            
         try:
             write_file_result(cfg, result)
+            written_count += 1
         except Exception as e:
             logger.error("DB write failed for %s: %s", result.get("file", "?"), e)
             errors += 1
-        if i % 20 == 0:
-            logger.info("  Written %d / %d files...", i, len(results))
+        if written_count > 0 and written_count % 20 == 0:
+            logger.info("  Written %d dirty files...", written_count)
+    
+    logger.info("DB write complete: %d dirty files written, %d errors", written_count, errors)
 
-    # 4. Run ESLint scan and save results to DB
-    logger.info("Running ESLint scan...")
-    try:
-        scan_ok = run_eslint_scan(BASE_PATH)
-        if scan_ok:
-            eslint_results = parse_eslint_results()
-            if eslint_results:
-                from db.db_writer import write_eslint_flags
-                eslint_counts = write_eslint_flags(cfg, eslint_results)
-                logger.info("  Written %d ESLint flags to file_flags, %d to accessibility_defects",
-                            eslint_counts["file_flags"], eslint_counts["accessibility_defects"])
+    # 4. Run ESLint scan and save results to DB (targeted for dirty files only)
+    if dirty_files:
+        logger.info("Running targeted ESLint scan on %d dirty files...", len(dirty_files))
+        try:
+            scan_ok = run_eslint_scan(BASE_PATH, dirty_files)
+            if scan_ok:
+                eslint_results = parse_eslint_results()
+                if eslint_results:
+                    from db.db_writer import write_eslint_flags
+                    eslint_counts = write_eslint_flags(cfg, eslint_results)
+                    logger.info("  Written %d ESLint flags to file_flags, %d to accessibility_defects",
+                                eslint_counts["file_flags"], eslint_counts["accessibility_defects"])
+                else:
+                    logger.info("  No ESLint issues found in dirty files")
             else:
-                logger.info("  No ESLint issues found")
-        else:
-            logger.warning("  ESLint scan did not generate a report")
-    except Exception as e:
-        logger.error("  ESLint scan failed: %s", e)
+                logger.warning("  ESLint scan did not generate a report")
+        except Exception as e:
+            logger.error("  ESLint scan failed: %s", e)
+    else:
+        logger.info("Skipping ESLint scan - no dirty files found (all files unchanged)")
 
     # 5. Save combined JSON (Removed: Relying entirely on the DB export)
 
     # 6. Summary table
-    total_flags = sum(r["flags_count"] for r in results)
-    ok = [r for r in results if not r.get("error")]
+    # Only count flags from files that were actually processed (not skipped)
+    processed_results = [r for r in results if not r.get("skipped")]
+    skipped_results = [r for r in results if r.get("skipped")]
+    
+    total_flags = sum(r["flags_count"] for r in processed_results)
+    ok = [r for r in processed_results if not r.get("error")]
     flagged = [r for r in ok if r["flags_count"] > 0]
     clean = [r for r in ok if r["flags_count"] == 0]
 
-    # Top 10 most flagged files
+    # Top 10 most flagged files (from processed files only)
     top10 = sorted(ok, key=lambda r: r["flags_count"], reverse=True)[:10]
 
     print()
     print("=" * 65)
-    print("  SCAN SUMMARY")
+    print("  INCREMENTAL SCAN SUMMARY")
     print("=" * 65)
-    print(f"  Files scanned  : {len(results)}")
-    print(f"  Errors         : {errors}")
-    print(f"  Clean files    : {len(clean)}")
-    print(f"  Flagged files  : {len(flagged)}")
-    print(f"  Total flags    : {total_flags}")
-    print(f"  Elapsed time   : {elapsed:.1f}s")
+    print(f"  Total files found   : {len(results)}")
+    print(f"  Files processed     : {len(processed_results)}")
+    print(f"  Files skipped       : {len(skipped_results)}")
+    print(f"  Errors              : {errors}")
+    print(f"  Clean files         : {len(clean)}")
+    print(f"  Flagged files       : {len(flagged)}")
+    print(f"  Total flags         : {total_flags}")
+    print(f"  Elapsed time        : {elapsed:.1f}s")
     print()
     print("  TOP 10 MOST FLAGGED FILES:")
     print(f"  {'File':<45} {'Flags':>5}  Triggered")
@@ -184,7 +201,7 @@ def main():
             f"  {fname:<45} {r['flags_count']:>5}  {', '.join(flag_names[:3])}{'...' if len(flag_names) > 3 else ''}"
         )
     print()
-    print(f"  DB   : {cfg['db']['database']}.vue_files ({len(results)} rows)")
+    print(f"  DB   : {cfg['db']['database']}.vue_files ({len(processed_results)} new/updated rows)")
 
     # NEW STEP: Extract UI elements (Task 4)
     # Placed here so db_writer.py export captures the new ui_extractions schema implicitly.
@@ -257,6 +274,33 @@ def main():
         task7_main.main(cfg)
     except Exception as e:
         logger.error("Failed to run Task 7 Issue Detector: %s", e)
+
+    # 12. Database Cleanup Phase (Orphaned Files)
+    logger.info("Starting database cleanup for orphaned files...")
+    try:
+        from db.db_writer import cleanup_orphaned_files
+        cleanup_stats = cleanup_orphaned_files(cfg, BASE_PATH)
+        
+        total_removed = (cleanup_stats["vue_files_removed"] + 
+                      cleanup_stats["api_calls_removed"] + 
+                      cleanup_stats["file_flags_removed"] + 
+                      cleanup_stats["accessibility_defects_removed"] +
+                      cleanup_stats["ui_extractions_removed"] + 
+                      cleanup_stats["ui_defects_removed"])
+        
+        if total_removed > 0:
+            logger.info("Database cleanup completed:")
+            logger.info("  - Vue files removed: %d", cleanup_stats["vue_files_removed"])
+            logger.info("  - API calls removed: %d", cleanup_stats["api_calls_removed"])
+            logger.info("  - File flags removed: %d", cleanup_stats["file_flags_removed"])
+            logger.info("  - Accessibility defects removed: %d", cleanup_stats["accessibility_defects_removed"])
+            logger.info("  - UI extractions removed: %d", cleanup_stats["ui_extractions_removed"])
+            logger.info("  - UI defects removed: %d", cleanup_stats["ui_defects_removed"])
+            logger.info("  Total rows removed: %d", total_removed)
+        else:
+            logger.info("Database cleanup: No orphaned files found")
+    except Exception as e:
+        logger.error("Database cleanup failed: %s", e)
 
     # We remove the old final summary print here because task7.issue_detector handles it now.
 

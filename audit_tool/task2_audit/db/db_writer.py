@@ -42,6 +42,7 @@ _DDL = [
         flag_count    INT DEFAULT 0,
         confidence    VARCHAR(10),
         scanned_at    DATETIME,
+        file_hash     VARCHAR(64),
         UNIQUE KEY uq_file_path (file_path(512))
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
@@ -194,6 +195,14 @@ def setup_schema(cfg: dict) -> None:
         if e.errno != 1060:
             logger.warning("[db_writer] Failed to alter file_flags table: %s", e)
 
+    # Safe alter table for vue_files - add file_hash column
+    try:
+        cur.execute("ALTER TABLE vue_files ADD COLUMN file_hash VARCHAR(64)")
+    except mysql.connector.Error as e:
+        # Error 1060: Duplicate column name
+        if e.errno != 1060:
+            logger.warning("[db_writer] Failed to alter vue_files table: %s", e)
+
     conn.commit()
     conn.close()
     logger.info(
@@ -240,8 +249,8 @@ def write_file_result(cfg: dict, result: dict) -> None:
                 (file_path, module, script_lines, methods, computed, watchers,
                  template_lines, child_components, max_nesting_depth,
                  api_total, api_mounted, payload_keys, payload_depth, payload_size_kb,
-                 flag_count, confidence, scanned_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 flag_count, confidence, scanned_at, file_hash)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON DUPLICATE KEY UPDATE
                 module=VALUES(module),
                 script_lines=VALUES(script_lines), methods=VALUES(methods),
@@ -253,7 +262,7 @@ def write_file_result(cfg: dict, result: dict) -> None:
                 payload_keys=VALUES(payload_keys), payload_depth=VALUES(payload_depth),
                 payload_size_kb=VALUES(payload_size_kb),
                 flag_count=VALUES(flag_count), confidence=VALUES(confidence),
-                scanned_at=VALUES(scanned_at)
+                scanned_at=VALUES(scanned_at), file_hash=VALUES(file_hash)
         """,
             (
                 filepath,
@@ -273,6 +282,7 @@ def write_file_result(cfg: dict, result: dict) -> None:
                 len(flags),
                 conf,
                 now,
+                result.get("file_hash", ""),
             ),
         )
         file_id = cur.lastrowid or _get_file_id(cur, filepath)
@@ -333,6 +343,162 @@ def _get_file_id(cur, filepath: str) -> int:
     cur.execute("SELECT id FROM vue_files WHERE file_path = %s", (filepath,))
     row = cur.fetchone()
     return row[0] if row else 0
+
+
+def calculate_file_hash(filepath: str) -> str:
+    """
+    Calculate SHA-256 hash of a file's raw text content.
+    
+    Args:
+        filepath (str): Path to the file to hash
+        
+    Returns:
+        str: Hexadecimal SHA-256 hash
+    """
+    import hashlib
+    
+    try:
+        with open(filepath, 'rb') as f:
+            content = f.read()
+        return hashlib.sha256(content).hexdigest()
+    except Exception as e:
+        logger.error("[db_writer] Failed to calculate hash for '%s': %s", filepath, e)
+        return ""
+
+
+def check_file_hash_exists(cfg: dict, filepath: str, file_hash: str) -> bool:
+    """
+    Check if a file with the exact same path and hash already exists in the database.
+    
+    Args:
+        cfg (dict): Parsed project_config.yaml
+        filepath (str): Normalized file path
+        file_hash (str): SHA-256 hash of the file content
+        
+    Returns:
+        bool: True if the file exists with the same hash, False otherwise
+    """
+    if not file_hash:
+        return False
+        
+    conn = _get_connection(cfg)
+    cur = conn.cursor()
+    
+    try:
+        cur.execute(
+            "SELECT COUNT(*) FROM vue_files WHERE file_path = %s AND file_hash = %s",
+            (filepath, file_hash)
+        )
+        count = cur.fetchone()[0]
+        return count > 0
+    except Exception as e:
+        logger.error("[db_writer] Failed to check file hash: %s", e)
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+
+def cleanup_orphaned_files(cfg: dict, base_path: str) -> dict:
+    """
+    Clean up orphaned files from database.
+    Compares files on disk against files stored in database and removes entries for deleted files.
+    
+    Args:
+        cfg (dict): Parsed project_config.yaml
+        base_path (str): Base path to scan for existing files
+        
+    Returns:
+        dict: Cleanup statistics with counts of removed rows
+    """
+    from pathlib import Path
+    from extractors.vue_parser import get_all_vue_files
+    
+    conn = _get_connection(cfg)
+    cur = conn.cursor()
+    
+    cleanup_stats = {
+        "vue_files_removed": 0,
+        "api_calls_removed": 0,
+        "file_flags_removed": 0,
+        "accessibility_defects_removed": 0,
+        "ui_extractions_removed": 0,
+        "ui_defects_removed": 0
+    }
+    
+    try:
+        # Get all .vue and .js files that actually exist on disk
+        existing_files = set()
+        
+        # Get all .vue files
+        vue_files = get_all_vue_files(base_path)
+        existing_files.update(vue_files)
+        
+        # Get all .js files in the directory
+        base_path_obj = Path(base_path)
+        for js_file in base_path_obj.rglob("*.js"):
+            existing_files.add(str(js_file))
+        
+        # Normalize paths for database comparison
+        normalized_existing = set()
+        for file_path in existing_files:
+            from extractors.path_utils import normalize_path
+            normalized_existing.add(normalize_path(file_path, base_path))
+        
+        # Get all file paths from database
+        cur.execute("SELECT id, file_path FROM vue_files")
+        db_files = cur.fetchall()
+        
+        # Find orphaned files (in DB but not on disk)
+        orphaned_ids = []
+        for file_id, file_path in db_files:
+            if file_path not in normalized_existing:
+                orphaned_ids.append(file_id)
+        
+        if orphaned_ids:
+            logger.info("[cleanup] Found %d orphaned files in database", len(orphaned_ids))
+            
+            # Delete from all related tables (cascading deletes should handle this,
+            # but we'll be explicit for clarity)
+            
+            # Count what we're deleting first
+            if orphaned_ids:
+                id_list = ", ".join(map(str, orphaned_ids))
+                
+                cur.execute(f"SELECT COUNT(*) FROM api_calls WHERE file_id IN ({id_list})")
+                cleanup_stats["api_calls_removed"] = cur.fetchone()[0]
+                
+                cur.execute(f"SELECT COUNT(*) FROM file_flags WHERE file_id IN ({id_list})")
+                cleanup_stats["file_flags_removed"] = cur.fetchone()[0]
+                
+                cur.execute(f"SELECT COUNT(*) FROM accessibility_defects WHERE file_id IN ({id_list})")
+                cleanup_stats["accessibility_defects_removed"] = cur.fetchone()[0]
+                
+                cur.execute(f"SELECT COUNT(*) FROM ui_extractions WHERE file_id IN ({id_list})")
+                cleanup_stats["ui_extractions_removed"] = cur.fetchone()[0]
+                
+                cur.execute(f"SELECT COUNT(*) FROM ui_defects WHERE file_id IN ({id_list})")
+                cleanup_stats["ui_defects_removed"] = cur.fetchone()[0]
+                
+                # Delete from vue_files (cascades to other tables)
+                cur.execute(f"DELETE FROM vue_files WHERE id IN ({id_list})")
+                cleanup_stats["vue_files_removed"] = cur.rowcount
+                
+                conn.commit()
+                
+                logger.info("[cleanup] Removed %d orphaned files and related data", 
+                          cleanup_stats["vue_files_removed"])
+        else:
+            logger.info("[cleanup] No orphaned files found - database is clean")
+            
+    except Exception as e:
+        conn.rollback()
+        logger.error("[cleanup] Failed to cleanup orphaned files: %s", e)
+    finally:
+        cur.close()
+        conn.close()
+    
+    return cleanup_stats
 
 
 def export_db_to_json(cfg: dict, output_path: str) -> None:
