@@ -19,10 +19,15 @@ def run_eslint_scan(target_dir: str) -> bool:
         audit_tool_dir = Path(__file__).parent.parent.parent
         
         # Run ESLint command using local eslint executable
+        # Use --no-eslintrc to ignore the target project's config
+        # Use --config to force our audit_tool .eslintrc.js so we only get
+        # Vue best-practice and accessibility errors, not stylistic noise.
         result = subprocess.run(
             [
                 str(audit_tool_dir / "node_modules" / ".bin" / "eslint.cmd"),
                 target_dir,
+                "--no-eslintrc",
+                "--config", str(audit_tool_dir / ".eslintrc.js"),
                 "--ext", ".vue,.js",
                 "--format", "json",
                 "-o", "eslint_report.json"
@@ -80,13 +85,15 @@ def parse_eslint_results(json_path: str = "eslint_report.json") -> List[Dict[str
             messages = file_result.get("messages", [])
             
             for msg in messages:
-                results.append({
-                    "file_path": file_path,
-                    "rule_id": msg.get("ruleId", ""),
-                    "line": msg.get("line", 0),
-                    "message": msg.get("message", ""),
-                    "severity": msg.get("severity", 0)
-                })
+                # Only keep severity >= 2 (Errors), ignore stylistic Warnings
+                if msg.get("severity", 0) >= 2:
+                    results.append({
+                        "file_path": file_path,
+                        "rule_id": msg.get("ruleId", ""),
+                        "line": msg.get("line", 0),
+                        "message": msg.get("message", ""),
+                        "severity": msg.get("severity", 0)
+                    })
         
         return results
         

@@ -98,6 +98,7 @@ if not Path(BASE_PATH).exists():
 # ── Imports ───────────────────────────────────────────────────────────────────
 from extractors.orchestrator import scan_all_vue_files
 from db.db_writer import setup_schema, write_file_result, export_db_to_json
+from extractors.eslint_extractor import run_eslint_scan, parse_eslint_results
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -133,9 +134,27 @@ def main():
         if i % 20 == 0:
             logger.info("  Written %d / %d files...", i, len(results))
 
-    # 4. Save combined JSON (Removed: Relying entirely on the DB export)
+    # 4. Run ESLint scan and save results to DB
+    logger.info("Running ESLint scan...")
+    try:
+        scan_ok = run_eslint_scan(BASE_PATH)
+        if scan_ok:
+            eslint_results = parse_eslint_results()
+            if eslint_results:
+                from db.db_writer import write_eslint_flags
+                eslint_counts = write_eslint_flags(cfg, eslint_results)
+                logger.info("  Written %d ESLint flags to file_flags, %d to accessibility_defects",
+                            eslint_counts["file_flags"], eslint_counts["accessibility_defects"])
+            else:
+                logger.info("  No ESLint issues found")
+        else:
+            logger.warning("  ESLint scan did not generate a report")
+    except Exception as e:
+        logger.error("  ESLint scan failed: %s", e)
 
-    # 5. Summary table
+    # 5. Save combined JSON (Removed: Relying entirely on the DB export)
+
+    # 6. Summary table
     total_flags = sum(r["flags_count"] for r in results)
     ok = [r for r in results if not r.get("error")]
     flagged = [r for r in ok if r["flags_count"] > 0]
@@ -182,13 +201,13 @@ def main():
     except Exception as e:
         logger.error("Failed to run Task 4 UI Extractor: %s", e)
 
-    # 6. Export Database to JSON
+    # 7. Export Database to JSON
     db_json_path = BASE / "task2_db_export.json"
     logger.info("Exporting native database tables to %s...", db_json_path)
     export_db_to_json(cfg, str(db_json_path))
     print(f"  DB Export : {db_json_path}")
 
-    # 7. Generate Task 3 Component Complexity JSON
+    # 8. Generate Task 3 Component Complexity JSON
     try:
         from task3.task3_exporter import main as task3_main
 
@@ -200,7 +219,7 @@ def main():
     except Exception as e:
         logger.error("Failed to run Task 3 exporter: %s", e)
 
-    # 8. Task 5 UI Consistency and Spell Checker
+    # 9. Task 5 UI Consistency and Spell Checker
     try:
         if str(BASE / "task5") not in sys.path:
             sys.path.insert(0, str(BASE / "task5"))
@@ -214,21 +233,22 @@ def main():
     except Exception as e:
         logger.error("Failed to run Task 5 checker: %s", e)
 
-    # 9. Task 6 UI Accessibility & Usability Compliance Checker
-    try:
-        if str(BASE / "task6") not in sys.path:
-            sys.path.insert(0, str(BASE / "task6"))
-        from task6.accessibility_checker import main as task6_main
+    # 10. Task 6 UI Accessibility & Usability Compliance Checker
+    # DISABLED: Now handled by eslint_extractor writing to accessibility_defects
+    # try:
+    #     if str(BASE / "task6") not in sys.path:
+    #         sys.path.insert(0, str(BASE / "task6"))
+    #     from task6.accessibility_checker import main as task6_main
+    #
+    #     print()
+    #     print("=" * 65)
+    #     print("  TASK 6: UI ACCESSIBILITY CHECKER")
+    #     print("=" * 65)
+    #     task6_main(cfg)
+    # except Exception as e:
+    #     logger.error("Failed to run Task 6 checker: %s", e)
 
-        print()
-        print("=" * 65)
-        print("  TASK 6: UI ACCESSIBILITY CHECKER")
-        print("=" * 65)
-        task6_main(cfg)
-    except Exception as e:
-        logger.error("Failed to run Task 6 checker: %s", e)
-
-    # 10. Task 7 Unified Issue Detection Engine
+    # 11. Task 7 Unified Issue Detection Engine
     try:
         if str(BASE / "task7") not in sys.path:
             sys.path.insert(0, str(BASE / "task7"))

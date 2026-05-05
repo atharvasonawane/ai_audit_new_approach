@@ -453,3 +453,99 @@ def write_accessibility_defect(cfg: dict, defect: dict) -> None:
     finally:
         cur.close()
         conn.close()
+
+
+def write_eslint_flags(cfg: dict, eslint_results: list) -> dict:
+    """
+    Insert ESLint findings into the appropriate MySQL tables based on rule type.
+    
+    Rules starting with 'vuejs-accessibility/' are written to accessibility_defects.
+    All other rules (including 'vue/') are written to file_flags.
+    
+    Args:
+        cfg: Parsed project_config.yaml
+        eslint_results: List of dicts from parse_eslint_results()
+        
+    Returns:
+        Dict with counts: {'file_flags': int, 'accessibility_defects': int}
+    """
+    if not eslint_results:
+        return {"file_flags": 0, "accessibility_defects": 0}
+        
+    conn = _get_connection(cfg)
+    cur = conn.cursor()
+    file_flags_written = 0
+    accessibility_written = 0
+    
+    # Import path normalizer
+    base_path = cfg.get("base_path", "")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    try:
+        for issue in eslint_results:
+            file_path = issue.get("file_path", "")
+            rule_id = issue.get("rule_id", "")
+            
+            # Normalize path to match vue_files table format
+            if base_path:
+                from extractors.path_utils import normalize_path
+                normalized_path = normalize_path(file_path, base_path)
+            else:
+                normalized_path = file_path.replace("\\", "/")
+            
+            # Look up file_id from vue_files
+            file_id = _get_file_id(cur, normalized_path)
+            
+            if not file_id:
+                logger.warning("[db_writer] Could not find file_id for '%s' — skipping ESLint finding", normalized_path)
+                continue
+            
+            # Determine severity string from ESLint numeric severity (1=warning, 2=error)
+            severity_num = issue.get("severity", 0)
+            severity_str = "error" if severity_num >= 2 else "warning"
+            
+            if rule_id.startswith("vuejs-accessibility/"):
+                # Write to accessibility_defects
+                cur.execute(
+                    """
+                    INSERT INTO accessibility_defects
+                        (file_id, file_path, module, rule, defect_type, element, severity, line_number, confidence, scanned_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                    (
+                        file_id,
+                        normalized_path,
+                        cfg.get("module", ""),
+                        rule_id,
+                        "ESLint Accessibility",
+                        issue.get("message", ""),
+                        severity_str,
+                        issue.get("line", 0),
+                        "HIGH",
+                        now,
+                    ),
+                )
+                accessibility_written += 1
+            else:
+                # Write to file_flags
+                cur.execute(
+                    """
+                    INSERT INTO file_flags (file_id, flag_name, category, line_number)
+                    VALUES (%s, %s, %s, %s)
+                """,
+                    (file_id, rule_id, "ESLINT", issue.get("line", 0)),
+                )
+                file_flags_written += 1
+            
+        conn.commit()
+        logger.info("[db_writer] Wrote %d ESLint flags to file_flags, %d to accessibility_defects",
+                      file_flags_written, accessibility_written)
+        
+    except Exception as exc:
+        conn.rollback()
+        logger.error("[db_writer] Failed to write ESLint flags: %s", exc)
+    finally:
+        cur.close()
+        conn.close()
+        
+    return {"file_flags": file_flags_written, "accessibility_defects": accessibility_written}

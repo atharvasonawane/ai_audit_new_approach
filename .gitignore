@@ -38,3 +38,5 @@ v3_architecture_summary.md
 
 # AI Docs
 AI_STATUS.md
+node_modules/
+eslint_report.json
