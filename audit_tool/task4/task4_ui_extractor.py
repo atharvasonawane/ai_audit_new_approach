@@ -225,7 +225,14 @@ def process_vue_file(file_path):
 
     return result
 
-def main():
+def main(dirty_files=None):
+    """
+    Main entry point for Task 4 UI Extractor.
+    
+    Args:
+        dirty_files (list, optional): List of file paths to process. If None or empty, 
+                                     scans all .vue files under base_path.
+    """
     if not Path(CONFIG_PATH).exists():
         logger.error(f"Config not found at {CONFIG_PATH}")
         sys.exit(1)
@@ -251,11 +258,16 @@ def main():
     # Store base_path globally so process_vue_file can use it for normalization
     global _BASE_PATH
     _BASE_PATH = base_path
-        
-    # Scan ALL .vue files under base_path (not just components/views)
-    vue_files = get_all_vue_files(base_path)
-        
-    logger.info(f"Found {len(vue_files)} .vue files under base_path")
+    
+    # Determine which files to process
+    if dirty_files:
+        # Process only the provided dirty files (incremental mode)
+        vue_files = [f for f in dirty_files if f.endswith('.vue')]
+        logger.info(f"Processing {len(vue_files)} dirty .vue files (incremental mode)")
+    else:
+        # Scan ALL .vue files under base_path (full scan mode)
+        vue_files = get_all_vue_files(base_path)
+        logger.info(f"Found {len(vue_files)} .vue files under base_path (full scan mode)")
     
     extraction_results = []
     
@@ -278,6 +290,24 @@ def main():
         # Create a robust pathname map bypassing Windows slash and casing weirdness
         cur.execute("SELECT id, file_path FROM vue_files")
         file_map = {row[1].replace('\\', '/').lower(): row[0] for row in cur.fetchall()}
+        
+        # For incremental mode: delete existing entries for dirty files before inserting new ones
+        # This ensures we don't duplicate UI elements when re-processing changed files
+        if dirty_files and extraction_results:
+            file_ids_to_clear = []
+            for res in extraction_results:
+                clean_path = res.get("file", "").lower()
+                for db_path, fid in file_map.items():
+                    if db_path.endswith(clean_path):
+                        file_ids_to_clear.append(fid)
+                        break
+            
+            if file_ids_to_clear:
+                # Delete existing ui_extractions for these file_ids
+                format_strings = ','.join(['%s'] * len(file_ids_to_clear))
+                cur.execute(f"DELETE FROM ui_extractions WHERE file_id IN ({format_strings})", tuple(file_ids_to_clear))
+                deleted_count = cur.rowcount
+                logger.info(f"Cleared {deleted_count} existing UI extraction entries for {len(file_ids_to_clear)} dirty files")
         
         elements_inserted = 0
         for res in extraction_results:

@@ -97,7 +97,7 @@ if not Path(BASE_PATH).exists():
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 from extractors.orchestrator import scan_all_vue_files
-from db.db_writer import setup_schema, write_file_result, export_db_to_json
+from db.db_writer import setup_schema, write_file_result, export_db_to_json, get_all_file_hashes
 from extractors.eslint_extractor import run_eslint_scan, parse_eslint_results
 
 
@@ -115,14 +115,19 @@ def main():
     logger.info("Setting up database schema...")
     setup_schema(cfg)
 
-    # 2. Scan all files (with incremental auditing)
+    # 2. Load known file hashes from database into memory for fast lookup
+    logger.info("Loading known file hashes from database into memory...")
+    known_hashes = get_all_file_hashes(cfg)
+    logger.info("Loaded %d known file hashes into memory for incremental auditing", len(known_hashes))
+
+    # 3. Scan all files (with incremental auditing using in-memory hash lookup)
     start = time.time()
     logger.info("Starting incremental scan...")
-    results, dirty_files = scan_all_vue_files(BASE_PATH, cfg, CONFIG_PATH)
+    results, dirty_files = scan_all_vue_files(BASE_PATH, cfg, CONFIG_PATH, known_hashes)
     elapsed = time.time() - start
     logger.info("Incremental scan complete in %.1fs — %d files found, %d processed.", elapsed, len(results), len(dirty_files))
 
-    # 3. Write to DB (only dirty files)
+    # 4. Write to DB (only dirty files)
     logger.info("Writing dirty file results to MySQL...")
     errors = 0
     written_count = 0
@@ -142,7 +147,7 @@ def main():
     
     logger.info("DB write complete: %d dirty files written, %d errors", written_count, errors)
 
-    # 4. Run ESLint scan and save results to DB (targeted for dirty files only)
+    # 5. Run ESLint scan and save results to DB (targeted for dirty files only)
     if dirty_files:
         logger.info("Running targeted ESLint scan on %d dirty files...", len(dirty_files))
         try:
@@ -165,7 +170,7 @@ def main():
 
     # 5. Save combined JSON (Removed: Relying entirely on the DB export)
 
-    # 6. Summary table
+    # 7. Summary table
     # Only count flags from files that were actually processed (not skipped)
     processed_results = [r for r in results if not r.get("skipped")]
     skipped_results = [r for r in results if r.get("skipped")]
@@ -203,20 +208,24 @@ def main():
     print()
     print(f"  DB   : {cfg['db']['database']}.vue_files ({len(processed_results)} new/updated rows)")
 
-    # NEW STEP: Extract UI elements (Task 4)
-    # Placed here so db_writer.py export captures the new ui_extractions schema implicitly.
-    try:
-        if str(BASE / "task4") not in sys.path:
-            sys.path.insert(0, str(BASE / "task4"))
-        from task4_ui_extractor import main as task4_main
+    # NEW STEP: Extract UI elements (Task 4) - GATED to only dirty files
+    # Skip if no dirty files (nothing changed)
+    if dirty_files:
+        try:
+            if str(BASE / "task4") not in sys.path:
+                sys.path.insert(0, str(BASE / "task4"))
+            from task4_ui_extractor import main as task4_main
 
-        print()
-        print("=" * 65)
-        print("  TASK 4: VUE UI EXTRACTION SCANNER")
-        print("=" * 65)
-        task4_main()
-    except Exception as e:
-        logger.error("Failed to run Task 4 UI Extractor: %s", e)
+            print()
+            print("=" * 65)
+            print("  TASK 4: VUE UI EXTRACTION SCANNER")
+            print("=" * 65)
+            logger.info("Running targeted Task 4 UI extraction on %d dirty files...", len(dirty_files))
+            task4_main(dirty_files=dirty_files)
+        except Exception as e:
+            logger.error("Failed to run Task 4 UI Extractor: %s", e)
+    else:
+        logger.info("Skipping Task 4 UI Extraction - no dirty files (all files unchanged)")
 
     # 7. Export Database to JSON
     db_json_path = BASE / "task2_db_export.json"
@@ -236,19 +245,24 @@ def main():
     except Exception as e:
         logger.error("Failed to run Task 3 exporter: %s", e)
 
-    # 9. Task 5 UI Consistency and Spell Checker
-    try:
-        if str(BASE / "task5") not in sys.path:
-            sys.path.insert(0, str(BASE / "task5"))
-        from task5.ui_consistency_checker import main as task5_main
+    # 9. Task 5 UI Consistency and Spell Checker - GATED to only dirty files
+    # Skip if no dirty files (nothing changed)
+    if dirty_files:
+        try:
+            if str(BASE / "task5") not in sys.path:
+                sys.path.insert(0, str(BASE / "task5"))
+            from task5.ui_consistency_checker import main as task5_main
 
-        print()
-        print("=" * 65)
-        print("  TASK 5: UI CONSISTENCY & SPELL CHECKER")
-        print("=" * 65)
-        task5_main(cfg)
-    except Exception as e:
-        logger.error("Failed to run Task 5 checker: %s", e)
+            print()
+            print("=" * 65)
+            print("  TASK 5: UI CONSISTENCY & SPELL CHECKER")
+            print("=" * 65)
+            logger.info("Running targeted Task 5 UI consistency check on %d dirty files...", len(dirty_files))
+            task5_main(cfg, dirty_files=dirty_files)
+        except Exception as e:
+            logger.error("Failed to run Task 5 checker: %s", e)
+    else:
+        logger.info("Skipping Task 5 UI Consistency Check - no dirty files (all files unchanged)")
 
     # 10. Task 6 UI Accessibility & Usability Compliance Checker
     # DISABLED: Now handled by eslint_extractor writing to accessibility_defects

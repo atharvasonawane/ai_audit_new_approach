@@ -121,11 +121,109 @@ class UIConsistencyChecker:
             conn.close()
 
     def load_data(self):
+        """Load data from JSON file (legacy method, kept for compatibility)."""
         if not EXTRACTION_PATH.exists():
             logger.error("UI extraction file not found at %s. Please run Task 4 first.", EXTRACTION_PATH)
             return None
         with open(EXTRACTION_PATH, "r", encoding="utf-8") as f:
             return json.load(f).get("uiExtraction", [])
+    
+    def load_data_from_db(self):
+        """Load UI extraction data from MySQL database (single source of truth)."""
+        logger.info("Loading UI extraction data from MySQL database...")
+        try:
+            conn = _get_connection(self.cfg)
+            cur = conn.cursor(dictionary=True)
+            
+            # Query all ui_extractions joined with vue_files to get file paths
+            cur.execute("""
+                SELECT vf.file_path, ue.element_category, ue.text_content, ue.css_class, ue.text_type
+                FROM ui_extractions ue
+                JOIN vue_files vf ON ue.file_id = vf.id
+            """)
+            
+            rows = cur.fetchall()
+            
+            # Group by file_path
+            file_data = {}
+            for row in rows:
+                filepath = row["file_path"]
+                if filepath not in file_data:
+                    file_data[filepath] = {
+                        "file": filepath,
+                        "buttons": [],
+                        "headers": [],
+                        "visibleTexts": [],
+                        "uses_i18n": False
+                    }
+                
+                element = {
+                    "text": row["text_content"] or "",
+                    "class": row["css_class"] or "",
+                    "type": row["text_type"] or "static"
+                }
+                
+                category = row["element_category"]
+                if category == "button":
+                    file_data[filepath]["buttons"].append(element)
+                elif category == "header":
+                    file_data[filepath]["headers"].append(element)
+                elif category == "visible_text":
+                    file_data[filepath]["visibleTexts"].append(element)
+                
+                # Check for i18n
+                if element["type"] in ("i18n", "mixed"):
+                    file_data[filepath]["uses_i18n"] = True
+            
+            result = list(file_data.values())
+            logger.info("Loaded %d files with UI extractions from database", len(result))
+            return result
+            
+        except Exception as e:
+            logger.error("Failed to load UI extraction data from database: %s", e)
+            return None
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
+    
+    def clear_defects_for_files(self, filepaths: list):
+        """Clear existing ui_defects for specific files before re-evaluating them."""
+        if not filepaths:
+            return
+        
+        logger.info("Clearing existing UI defects for %d files...", len(filepaths))
+        try:
+            conn = _get_connection(self.cfg)
+            cur = conn.cursor()
+            
+            # Get file_ids for the given paths
+            file_ids = []
+            for filepath in filepaths:
+                fid = self.fetch_file_id(filepath)
+                if fid:
+                    file_ids.append(fid)
+            
+            if file_ids:
+                # Delete ui_defects for these file_ids
+                format_strings = ','.join(['%s'] * len(file_ids))
+                cur.execute(f"DELETE FROM ui_defects WHERE file_id IN ({format_strings})", tuple(file_ids))
+                deleted_count = cur.rowcount
+                conn.commit()
+                logger.info("Cleared %d existing UI defect entries for %d files", deleted_count, len(file_ids))
+            else:
+                logger.info("No matching file IDs found to clear defects")
+                
+        except Exception as e:
+            logger.error("Failed to clear UI defects: %s", e)
+            if 'conn' in locals():
+                conn.rollback()
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
 
     def fetch_file_id(self, filepath: str) -> int:
         """Fetch the DB ID for the file using robust endswith matching."""
@@ -315,7 +413,16 @@ class UIConsistencyChecker:
 
         return report_data
 
-def main(external_cfg=None):
+def main(external_cfg=None, dirty_files=None):
+    """
+    Main entry point for Task 5 UI Consistency and Spell Checker.
+    
+    Args:
+        external_cfg (dict, optional): Configuration dictionary. If None, loads from CONFIG_PATH.
+        dirty_files (list, optional): List of file paths to process. If provided, only these 
+                                     files will be evaluated and updated in the database.
+                                     Global baselines will still be computed from all files.
+    """
     logger.info("Initializing UI Consistency and Spell Checker...")
     if external_cfg:
         cfg = external_cfg
@@ -335,16 +442,37 @@ def main(external_cfg=None):
             pass
 
     checker = UIConsistencyChecker(cfg)
-    data = checker.load_data()
-    if not data:
-        logger.warning("No data found or extraction empty.")
-        return
-
-    logger.info("Running Pass 1: Global pattern aggregation...")
-    checker.pass_one(data)
     
-    logger.info("Running Pass 2: Evaluating files...")
-    report = checker.pass_two_evaluate_files(data)
+    # Load data from MySQL (not JSON) to get ALL files for baseline calculation
+    # But only evaluate dirty_files if specified
+    all_data = checker.load_data_from_db()
+    if not all_data:
+        logger.warning("No data found in database or extraction empty.")
+        return
+    
+    # If dirty_files specified, filter data for evaluation
+    if dirty_files:
+        dirty_files_set = set(f.replace('\\', '/').lower() for f in dirty_files)
+        evaluation_data = [rec for rec in all_data if rec.get("file", "").replace('\\', '/').lower() in dirty_files_set]
+        logger.info("Running in INCREMENTAL mode: %d files to evaluate out of %d total files", 
+                    len(evaluation_data), len(all_data))
+        
+        if not evaluation_data:
+            logger.info("No matching dirty files found in database. Skipping Task 5.")
+            return
+    else:
+        evaluation_data = all_data
+        logger.info("Running in FULL mode: evaluating all %d files", len(all_data))
+
+    logger.info("Running Pass 1: Global pattern aggregation on all %d files...", len(all_data))
+    checker.pass_one(all_data)
+    
+    # Clear existing ui_defects for dirty files before evaluating (incremental mode only)
+    if dirty_files and evaluation_data:
+        checker.clear_defects_for_files([rec.get("file", "") for rec in evaluation_data])
+    
+    logger.info("Running Pass 2: Evaluating %d files...", len(evaluation_data))
+    report = checker.pass_two_evaluate_files(evaluation_data)
     
     with open(OUTPUT_REPORT_PATH, "w", encoding="utf-8") as f:
         json.dump({"uiConsistency": report}, f, indent=2)
