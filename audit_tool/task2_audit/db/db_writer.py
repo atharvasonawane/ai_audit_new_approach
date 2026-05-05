@@ -366,6 +366,40 @@ def calculate_file_hash(filepath: str) -> str:
         return ""
 
 
+def get_all_file_hashes(cfg: dict) -> dict:
+    """
+    Load all file hashes from database into memory for fast lookup.
+    
+    Args:
+        cfg (dict): Parsed project_config.yaml
+        
+    Returns:
+        dict: {file_path: file_hash} mapping from database
+    """
+    conn = _get_connection(cfg)
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("SELECT file_path, file_hash FROM vue_files")
+        rows = cur.fetchall()
+        
+        # Build dictionary, filtering out None hashes
+        result = {}
+        for file_path, file_hash in rows:
+            if file_hash:
+                result[file_path] = file_hash
+        
+        logger.info("[db_writer] Loaded %d file hashes from database into memory", len(result))
+        return result
+        
+    except Exception as e:
+        logger.error("[db_writer] Failed to load file hashes: %s", e)
+        return {}
+    finally:
+        cur.close()
+        conn.close()
+
+
 def check_file_hash_exists(cfg: dict, filepath: str, file_hash: str) -> bool:
     """
     Check if a file with the exact same path and hash already exists in the database.
