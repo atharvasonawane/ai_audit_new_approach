@@ -16,14 +16,15 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
+def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str, known_hashes: dict = None) -> dict:
     """
     Run the full analysis pipeline on a single .vue file.
 
     Args:
-        filepath    (str) : Absolute path to the .vue file.
-        cfg         (dict): Parsed project_config.yaml.
-        config_path (str) : Path to config file (needed by mql_extractor).
+        filepath     (str) : Absolute path to the .vue file.
+        cfg          (dict): Parsed project_config.yaml.
+        config_path  (str) : Path to config file (needed by mql_extractor).
+        known_hashes (dict): In-memory dictionary of {file_path: file_hash} for fast lookup.
 
     Returns:
         dict: Full result including extracted_metrics, api_calls, flags_triggered.
@@ -47,7 +48,7 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
         calculate_payload_size_kb,
     )
     from checkers.flag_engine import evaluate_flags, summarise_flags
-    from db.db_writer import calculate_file_hash, check_file_hash_exists
+    from db.db_writer import calculate_file_hash
     from extractors.path_utils import normalize_path
 
     # Use the dynamic module name from cfg (calculated in run_audit.py)
@@ -61,22 +62,23 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
     base_path = cfg.get("base_path", "")
     normalized_filepath = normalize_path(filepath, base_path) if base_path else filepath.replace("\\", "/")
     
-    # Check if file has unchanged content (skip mechanism)
-    if check_file_hash_exists(cfg, normalized_filepath, file_hash):
-        logger.info("Skipping %s (Unchanged)", Path(filepath).name)
-        return {
-            "file": filepath,
-            "module": module,
-            "confidence": confidence,
-            "extracted_metrics": {},
-            "api_calls": [],
-            "flags_triggered": [],
-            "flags_by_category": {},
-            "flags_count": 0,
-            "error": None,
-            "skipped": True,
-            "file_hash": file_hash,
-        }
+    # Check if file has unchanged content using in-memory dictionary (fast lookup)
+    if known_hashes is not None and normalized_filepath in known_hashes:
+        if known_hashes[normalized_filepath] == file_hash:
+            logger.info("Skipping %s (Unchanged)", Path(filepath).name)
+            return {
+                "file": filepath,
+                "module": module,
+                "confidence": confidence,
+                "extracted_metrics": {},
+                "api_calls": [],
+                "flags_triggered": [],
+                "flags_by_category": {},
+                "flags_count": 0,
+                "error": None,
+                "skipped": True,
+                "file_hash": file_hash,
+            }
 
     # Default empty result
     empty = {
@@ -196,15 +198,16 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str) -> dict:
         return result
 
 
-def scan_all_vue_files(base_path: str, cfg: dict, config_path: str) -> tuple[list, list]:
+def scan_all_vue_files(base_path: str, cfg: dict, config_path: str, known_hashes: dict = None) -> tuple[list, list]:
     """
     Find every .vue file under base_path and run the full pipeline on each.
     Implements incremental auditing by skipping unchanged files.
 
     Args:
-        base_path   (str) : Root folder to scan recursively.
-        cfg         (dict): Parsed project_config.yaml.
-        config_path (str) : Path to config file.
+        base_path    (str) : Root folder to scan recursively.
+        cfg          (dict): Parsed project_config.yaml.
+        config_path  (str) : Path to config file.
+        known_hashes (dict): In-memory dictionary of {file_path: file_hash} for fast lookup.
 
     Returns:
         tuple: (results, dirty_files) where:
@@ -225,7 +228,7 @@ def scan_all_vue_files(base_path: str, cfg: dict, config_path: str) -> tuple[lis
     skipped_count = 0
 
     for idx, filepath in enumerate(vue_files, 1):
-        result = run_pipeline_on_file(filepath, cfg, config_path)
+        result = run_pipeline_on_file(filepath, cfg, config_path, known_hashes)
         results.append(result)
         
         if result.get("skipped"):
