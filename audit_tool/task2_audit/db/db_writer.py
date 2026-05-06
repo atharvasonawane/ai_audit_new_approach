@@ -368,28 +368,31 @@ def calculate_file_hash(filepath: str) -> str:
 
 def get_all_file_hashes(cfg: dict) -> dict:
     """
-    Load all file hashes from database into memory for fast lookup.
+    Load all file hashes and timestamps from database into memory for fast lookup.
     
     Args:
         cfg (dict): Parsed project_config.yaml
         
     Returns:
-        dict: {file_path: file_hash} mapping from database
+        dict: {file_path: {"hash": file_hash, "scanned_at": scanned_at}} mapping from database
     """
     conn = _get_connection(cfg)
     cur = conn.cursor()
     
     try:
-        cur.execute("SELECT file_path, file_hash FROM vue_files")
+        cur.execute("SELECT file_path, file_hash, scanned_at FROM vue_files")
         rows = cur.fetchall()
         
-        # Build dictionary, filtering out None hashes
+        # Build dictionary with hash and timestamp
         result = {}
-        for file_path, file_hash in rows:
+        for file_path, file_hash, scanned_at in rows:
             if file_hash:
-                result[file_path] = file_hash
+                result[file_path] = {
+                    "hash": file_hash,
+                    "scanned_at": scanned_at
+                }
         
-        logger.info("[db_writer] Loaded %d file hashes from database into memory", len(result))
+        logger.info("[db_writer] Loaded %d file hashes with timestamps from database into memory", len(result))
         return result
         
     except Exception as e:

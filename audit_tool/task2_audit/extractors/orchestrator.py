@@ -11,6 +11,7 @@ Pipeline per file:
 """
 
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -18,16 +19,17 @@ logger = logging.getLogger(__name__)
 
 def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str, known_hashes: dict = None) -> dict:
     """
-    Run the full analysis pipeline on a single .vue file.
-
+    Run the full parsing and extraction pipeline on a single .vue file.
+    Implements incremental auditing with two-step filter: mtime Gate 1 + SHA-256 Gate 2.
+    
     Args:
-        filepath     (str) : Absolute path to the .vue file.
-        cfg          (dict): Parsed project_config.yaml.
-        config_path  (str) : Path to config file (needed by mql_extractor).
-        known_hashes (dict): In-memory dictionary of {file_path: file_hash} for fast lookup.
-
+        filepath (str): Path to the .vue file.
+        cfg (dict): Parsed project_config.yaml.
+        config_path (str): Path to config file.
+        known_hashes (dict): In-memory dictionary of {file_path: {"hash": file_hash, "scanned_at": timestamp}}.
+    
     Returns:
-        dict: Full result including extracted_metrics, api_calls, flags_triggered.
+        dict: Result containing extracted data and metadata.
     """
     import sys
     from pathlib import Path as _Path
@@ -51,20 +53,54 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str, known_hashe
     from db.db_writer import calculate_file_hash
     from extractors.path_utils import normalize_path
 
-    # Use the dynamic module name from cfg (calculated in run_audit.py)
-    module = cfg.get("module", "unknown")
+    # Extract module name from path
+    module = _Path(filepath).stem
     confidence = cfg.get("mql", {}).get("confidence", "HIGH")
 
-    # Calculate file hash for incremental auditing
-    file_hash = calculate_file_hash(filepath)
-    
     # Normalize filepath for database comparison
     base_path = cfg.get("base_path", "")
     normalized_filepath = normalize_path(filepath, base_path) if base_path else filepath.replace("\\", "/")
     
+    # GATE 1: mtime pre-filter (OS-level check, no disk I/O for hash calculation)
+    if known_hashes is not None and normalized_filepath in known_hashes:
+        file_info = known_hashes[normalized_filepath]
+        db_scanned_at = file_info.get("scanned_at")
+        
+        if db_scanned_at:
+            try:
+                # Get local file modification time
+                local_mtime = os.path.getmtime(filepath)
+                
+                # If local file is OLDER than database scan time, skip everything
+                if local_mtime < db_scanned_at.timestamp():
+                    logger.info("Skipping %s (mtime - file older than last scan)", Path(filepath).name)
+                    return {
+                        "file": filepath,
+                        "module": module,
+                        "confidence": confidence,
+                        "extracted_metrics": {},
+                        "api_calls": [],
+                        "flags_triggered": [],
+                        "flags_by_category": {},
+                        "flags_count": 0,
+                        "error": None,
+                        "skipped": True,
+                        "file_hash": file_info.get("hash", ""),
+                    }
+            except (OSError, AttributeError) as e:
+                logger.warning("Failed to get mtime for %s: %s", filepath, e)
+    
+    # GATE 2: SHA-256 fallback (only if mtime check passed or failed)
+    # Calculate file hash for content comparison
+    file_hash = calculate_file_hash(filepath)
+    if not file_hash:
+        logger.warning("Could not calculate hash for %s", filepath)
+        file_hash = ""
+    
     # Check if file has unchanged content using in-memory dictionary (fast lookup)
     if known_hashes is not None and normalized_filepath in known_hashes:
-        if known_hashes[normalized_filepath] == file_hash:
+        stored_hash = known_hashes[normalized_filepath].get("hash")
+        if stored_hash == file_hash:
             logger.info("Skipping %s (Unchanged)", Path(filepath).name)
             return {
                 "file": filepath,
@@ -201,13 +237,13 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str, known_hashe
 def scan_all_vue_files(base_path: str, cfg: dict, config_path: str, known_hashes: dict = None) -> tuple[list, list]:
     """
     Find every .vue file under base_path and run the full pipeline on each.
-    Implements incremental auditing by skipping unchanged files.
+    Implements incremental auditing with two-step filter: mtime Gate 1 + SHA-256 Gate 2.
 
     Args:
         base_path    (str) : Root folder to scan recursively.
         cfg          (dict): Parsed project_config.yaml.
         config_path  (str) : Path to config file.
-        known_hashes (dict): In-memory dictionary of {file_path: file_hash} for fast lookup.
+        known_hashes (dict): In-memory dictionary of {file_path: {"hash": file_hash, "scanned_at": timestamp}} for fast lookup.
 
     Returns:
         tuple: (results, dirty_files) where:
@@ -222,7 +258,7 @@ def scan_all_vue_files(base_path: str, cfg: dict, config_path: str, known_hashes
     dirty_files = []
 
     logger.info("[orchestrator] Found %d .vue files under '%s'.", total, base_path)
-    logger.info("[orchestrator] Starting incremental audit with SHA-256 hashing...")
+    logger.info("[orchestrator] Starting incremental audit with mtime + SHA-256 two-step filter...")
 
     processed_count = 0
     skipped_count = 0
