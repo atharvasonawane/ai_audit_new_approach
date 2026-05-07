@@ -19,54 +19,81 @@ def run_eslint_scan(target_dir: str, dirty_files: List[str] = None) -> bool:
     try:
         # Get the audit_tool directory
         audit_tool_dir = Path(__file__).parent.parent.parent
+        report_path = audit_tool_dir / "eslint_report.json"
         
-        # Build ESLint command
-        cmd = [
-            str(audit_tool_dir / "node_modules" / ".bin" / "eslint.cmd"),
+        # Build base ESLint command
+        base_cmd = [
+            "npx", "eslint",
             "--no-eslintrc",
             "--config", str(audit_tool_dir / ".eslintrc.js"),
             "--format", "json",
             "-o", "eslint_report.json"
         ]
         
-        # If dirty_files is provided, scan only those files
-        # Otherwise, scan the entire directory
-        if dirty_files:
-            # Filter to only .vue and .js files from dirty_files
-            target_files = []
-            for file_path in dirty_files:
-                file_path = Path(file_path)
-                if file_path.suffix in ['.vue', '.js']:
-                    target_files.append(str(file_path))
+        # If no dirty_files is provided, scan entire directory (original behavior)
+        if not dirty_files:
+            cmd = base_cmd + [target_dir, "--ext", ".vue,.js"]
+            print(f"[DEBUG] Executing ESLint on entire directory...")
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=audit_tool_dir, shell=True)
+            return report_path.exists()
             
-            if not target_files:
-                # No .vue/.js files in dirty_files, nothing to scan
-                return True
+        # Filter to only .vue and .js files from dirty_files
+        target_files = []
+        for file_path in dirty_files:
+            file_path = Path(file_path)
+            if file_path.suffix in ['.vue', '.js']:
+                target_files.append(str(file_path))
+        
+        if not target_files:
+            # No .vue/.js files in dirty_files, nothing to scan
+            return True
+            
+        # Chunk the target files to avoid Windows command line length limits
+        chunk_size = 30
+        chunks = [target_files[i:i + chunk_size] for i in range(0, len(target_files), chunk_size)]
+        
+        all_json_results = []
+        print(f"[DEBUG] Executing ESLint in {len(chunks)} chunks for {len(target_files)} files...")
+        
+        for i, chunk in enumerate(chunks):
+            cmd = base_cmd + chunk
+            
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    cwd=audit_tool_dir,
+                    shell=True
+                )
                 
-            cmd.extend(target_files)
-        else:
-            # Scan entire directory (original behavior)
-            cmd.extend([
-                target_dir,
-                "--ext", ".vue,.js"
-            ])
-        
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=audit_tool_dir
-        )
-        
-        # Check if the report file was generated
-        report_path = Path(__file__).parent.parent.parent / "eslint_report.json"
+                if result.returncode != 0:
+                    print(f"[DEBUG] ESLint chunk {i+1} returned non-zero exit code: {result.returncode}")
+                    if result.stderr:
+                        print(f"[DEBUG] ESLint STDERR:\n{result.stderr}")
+                        
+                if report_path.exists():
+                    with open(report_path, "r", encoding="utf-8") as f:
+                        content = f.read().strip()
+                        if content and content not in ("[]", "{}"):
+                            chunk_data = json.loads(content)
+                            if isinstance(chunk_data, list):
+                                all_json_results.extend(chunk_data)
+                else:
+                    print(f"[DEBUG] ESLint report file was NOT generated for chunk {i+1}!")
+                    
+            except Exception as e:
+                print(f"[DEBUG] Error running ESLint chunk {i+1}: {e}")
+                
+        # Write the aggregated results back to the single report file for the parser to read
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(all_json_results, f, indent=2)
+            
+        # Also return True if we have the file
         return report_path.exists()
             
-    except subprocess.CalledProcessError as e:
-        print(f"ESLint scan failed: {e}")
-        return False
     except Exception as e:
-        print(f"Error running ESLint scan: {e}")
+        print(f"Error preparing ESLint scan: {e}")
         return False
 
 
@@ -101,6 +128,7 @@ def parse_eslint_results(json_path: str = "eslint_report.json") -> List[Dict[str
         
         # Extract issues from each file
         results = []
+        a11y_defects = 0
         for file_result in data:
             file_path = file_result.get("filePath", "")
             messages = file_result.get("messages", [])
@@ -108,14 +136,19 @@ def parse_eslint_results(json_path: str = "eslint_report.json") -> List[Dict[str
             for msg in messages:
                 # Only keep severity >= 2 (Errors), ignore stylistic Warnings
                 if msg.get("severity", 0) >= 2:
+                    rule_id = msg.get("ruleId", "")
+                    if rule_id and str(rule_id).startswith("vuejs-accessibility"):
+                        a11y_defects += 1
+                        
                     results.append({
                         "file_path": file_path,
-                        "rule_id": msg.get("ruleId", ""),
+                        "rule_id": rule_id,
                         "line": msg.get("line", 0),
                         "message": msg.get("message", ""),
                         "severity": msg.get("severity", 0)
                     })
         
+        print(f"[DEBUG] Extracted {a11y_defects} accessibility issues from ESLint JSON.")
         return results
         
     except json.JSONDecodeError as e:

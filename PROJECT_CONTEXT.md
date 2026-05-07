@@ -134,9 +134,10 @@ ender_template locally (/ route).
   - Includes line numbers in JSON exports
   - Note: Precision acceptable, not 100% exact for all edge cases
 
-### READY FOR NEXT STEPS (Phase 2)
-* Step 7 — Add code snippets to flags (1-3 line evidence)
-* Step 8 — Expand API detection (service classes, composables, Vuex)
+* **Extraction Pipeline Stability Fixes:**
+  - Fixed Task 5 incremental scan skip bug by mapping OS absolute paths to database relative paths using `.endswith()`.
+  - Resolved Windows CLI length limits (8191 chars) in ESLint extraction by chunking files into batches of 30.
+  - Fixed `[WinError 2]` for `npx` execution natively on Windows using `shell=True`.
 
 ### PHASE 3 (Completed via Pivot)
 * **Standalone ESLint Engine:** Implemented a standalone ESLint integration using Python's subprocess module to run `eslint-plugin-vue` and `eslint-plugin-vuejs-accessibility` locally within the audit_tool directory.

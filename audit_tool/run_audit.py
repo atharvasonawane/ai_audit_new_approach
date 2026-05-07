@@ -126,6 +126,7 @@ def main():
     results, dirty_files = scan_all_vue_files(BASE_PATH, cfg, CONFIG_PATH, known_hashes)
     elapsed = time.time() - start
     logger.info("Incremental scan complete in %.1fs — %d files found, %d processed.", elapsed, len(results), len(dirty_files))
+    print(f"\n[DEBUG] Total files marked as dirty: {len(dirty_files)}")
 
     # 4. Write to DB (only dirty files)
     logger.info("Writing dirty file results to MySQL...")
@@ -159,6 +160,7 @@ def main():
                     eslint_counts = write_eslint_flags(cfg, eslint_results)
                     logger.info("  Written %d ESLint flags to file_flags, %d to accessibility_defects",
                                 eslint_counts["file_flags"], eslint_counts["accessibility_defects"])
+                    print(f"ESLint found {eslint_counts['accessibility_defects']} accessibility issues")
                 else:
                     logger.info("  No ESLint issues found in dirty files")
             else:

@@ -453,7 +453,11 @@ def main(external_cfg=None, dirty_files=None):
     # If dirty_files specified, filter data for evaluation
     if dirty_files:
         dirty_files_set = set(f.replace('\\', '/').lower() for f in dirty_files)
-        evaluation_data = [rec for rec in all_data if rec.get("file", "").replace('\\', '/').lower() in dirty_files_set]
+        evaluation_data = []
+        for rec in all_data:
+            rec_file = rec.get("file", "").replace('\\', '/').lower()
+            if any(df.endswith(rec_file) for df in dirty_files_set):
+                evaluation_data.append(rec)
         logger.info("Running in INCREMENTAL mode: %d files to evaluate out of %d total files", 
                     len(evaluation_data), len(all_data))
         
