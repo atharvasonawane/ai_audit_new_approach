@@ -1,4 +1,4 @@
-base_path: C:/Users/Atharvaso/Desktop/PortalManagement/client/app/src
+base_path: C:/Users/Atharvaso/Desktop/StudentManagement/StudentManagement/client/app/src
 db:
   database: code_audit_db
   host: localhost
@@ -15,7 +15,7 @@ module: null
 mql:
   confidence: HIGH
   pattern: \w+\.\[(\w+)\]
-project: digital_university
+project_name: digital_university
 spelling:
   ignore_words:
   - DU

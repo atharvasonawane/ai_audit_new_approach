@@ -20,8 +20,12 @@ def main():
     with open(CONFIG_YAML, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
         
+    if "project_name" not in config:
+        print("Error: 'project_name' key must exist at the root level of project_config.yaml")
+        sys.exit(1)
+        
     db_config = config.get("db", {})
-    project_name = config.get("project", "default_project")
+    project_name = config["project_name"]
     
     # We enforce forward slashes for cross-platform processing
     base_path = config.get("base_path", "").replace('\\', '/')

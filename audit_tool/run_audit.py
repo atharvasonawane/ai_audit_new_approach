@@ -62,13 +62,16 @@ logger = logging.getLogger("run_audit")
 # ── Load config ───────────────────────────────────────────────────────────────
 cfg = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
 
+if "project_name" not in cfg:
+    logger.error("Error: 'project_name' key must exist at the root level of project_config.yaml")
+    sys.exit(1)
 # Dynamically set the module name. Priority:
 # 1. Explicit 'module' field in config (if set and non-empty)
-# 2. 'project' field from config
+# 2. 'project_name' field from config
 # 3. Heuristic: parent folder name of base_path
 if not cfg.get("module"):
-    if cfg.get("project"):
-        cfg["module"] = cfg["project"]
+    if cfg.get("project_name"):
+        cfg["module"] = cfg["project_name"]
     else:
         base_path_str = cfg.get("base_path", "").replace("\\", "/").rstrip("/")
         if base_path_str:
@@ -138,7 +141,7 @@ def main():
             continue
             
         try:
-            write_file_result(cfg, result)
+            write_file_result(cfg["project_name"], cfg, result)
             written_count += 1
         except Exception as e:
             logger.error("DB write failed for %s: %s", result.get("file", "?"), e)
@@ -157,7 +160,7 @@ def main():
                 eslint_results = parse_eslint_results()
                 if eslint_results:
                     from db.db_writer import write_eslint_flags
-                    eslint_counts = write_eslint_flags(cfg, eslint_results)
+                    eslint_counts = write_eslint_flags(cfg["project_name"], cfg, eslint_results)
                     logger.info("  Written %d ESLint flags to file_flags, %d to accessibility_defects",
                                 eslint_counts["file_flags"], eslint_counts["accessibility_defects"])
                     print(f"ESLint found {eslint_counts['accessibility_defects']} accessibility issues")

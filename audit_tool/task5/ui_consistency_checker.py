@@ -350,7 +350,7 @@ class UIConsistencyChecker:
                 defects.append(defect_obj)
                 if file_id > 0:
                     try:
-                        write_ui_defect(self.cfg, defect_obj)
+                        write_ui_defect(self.cfg["project_name"], self.cfg, defect_obj)
                     except Exception as e:
                         logger.error(f"Failed to write UI defect to DB: {e}")
 

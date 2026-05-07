@@ -25,6 +25,7 @@ _DDL = [
     """
     CREATE TABLE IF NOT EXISTS vue_files (
         id            INT AUTO_INCREMENT PRIMARY KEY,
+        project_name  VARCHAR(255) NOT NULL,
         file_path     VARCHAR(1024) NOT NULL,
         module        VARCHAR(255),
         script_lines  INT DEFAULT 0,
@@ -43,12 +44,13 @@ _DDL = [
         confidence    VARCHAR(10),
         scanned_at    DATETIME,
         file_hash     VARCHAR(64),
-        UNIQUE KEY uq_file_path (file_path(512))
+        UNIQUE KEY uq_file_path (project_name, file_path(512))
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
     CREATE TABLE IF NOT EXISTS api_calls (
         id           INT AUTO_INCREMENT PRIMARY KEY,
+        project_name VARCHAR(255) NOT NULL,
         file_id      INT NOT NULL,
         api_type     VARCHAR(20),
         method_name  VARCHAR(255),
@@ -62,6 +64,7 @@ _DDL = [
     """
     CREATE TABLE IF NOT EXISTS file_flags (
         id        INT AUTO_INCREMENT PRIMARY KEY,
+        project_name VARCHAR(255) NOT NULL,
         file_id   INT NOT NULL,
         flag_name VARCHAR(100),
         category  VARCHAR(50),
@@ -72,6 +75,7 @@ _DDL = [
     """
     CREATE TABLE IF NOT EXISTS ui_extractions (
         id INT AUTO_INCREMENT PRIMARY KEY,
+        project_name VARCHAR(255) NOT NULL,
         file_id INT NOT NULL,
         element_category VARCHAR(50),
         text_content TEXT,
@@ -83,6 +87,7 @@ _DDL = [
     """
     CREATE TABLE IF NOT EXISTS ui_defects (
         id INT AUTO_INCREMENT PRIMARY KEY,
+        project_name VARCHAR(255) NOT NULL,
         file_id INT NOT NULL,
         defect_type VARCHAR(50),
         severity VARCHAR(20),
@@ -95,6 +100,7 @@ _DDL = [
     """
     CREATE TABLE IF NOT EXISTS accessibility_defects (
         id INT AUTO_INCREMENT PRIMARY KEY,
+        project_name VARCHAR(255) NOT NULL,
         file_id INT NOT NULL,
         file_path VARCHAR(1024),
         module VARCHAR(255),
@@ -210,7 +216,7 @@ def setup_schema(cfg: dict) -> None:
     )
 
 
-def write_file_result(cfg: dict, result: dict) -> None:
+def write_file_result(project_name: str, cfg: dict, result: dict) -> None:
     """
     Insert (or replace) one .vue file's full analysis result into MySQL.
 
@@ -246,11 +252,11 @@ def write_file_result(cfg: dict, result: dict) -> None:
         cur.execute(
             """
             INSERT INTO vue_files
-                (file_path, module, script_lines, methods, computed, watchers,
+                (project_name, file_path, module, script_lines, methods, computed, watchers,
                  template_lines, child_components, max_nesting_depth,
                  api_total, api_mounted, payload_keys, payload_depth, payload_size_kb,
                  flag_count, confidence, scanned_at, file_hash)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON DUPLICATE KEY UPDATE
                 module=VALUES(module),
                 script_lines=VALUES(script_lines), methods=VALUES(methods),
@@ -265,6 +271,7 @@ def write_file_result(cfg: dict, result: dict) -> None:
                 scanned_at=VALUES(scanned_at), file_hash=VALUES(file_hash)
         """,
             (
+                project_name,
                 filepath,
                 module,
                 metrics.get("script_lines", 0),
@@ -296,10 +303,11 @@ def write_file_result(cfg: dict, result: dict) -> None:
             cur.execute(
                 """
                 INSERT INTO api_calls
-                    (file_id, api_type, method_name, full_match, in_mounted, in_loop, line_number)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    (project_name, file_id, api_type, method_name, full_match, in_mounted, in_loop, line_number)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             """,
                 (
+                    project_name,
                     file_id,
                     call.get("type", "MQL"),
                     call.get("method", ""),
@@ -321,10 +329,10 @@ def write_file_result(cfg: dict, result: dict) -> None:
             category = _FLAG_CATEGORY.get(flag, "OTHER")
             cur.execute(
                 """
-                INSERT INTO file_flags (file_id, flag_name, category, line_number)
-                VALUES (%s,%s,%s,%s)
+                INSERT INTO file_flags (project_name, file_id, flag_name, category, line_number)
+                VALUES (%s,%s,%s,%s,%s)
             """,
-                (file_id, flag, category, line or 0),
+                (project_name, file_id, flag, category, line or 0),
             )
 
         conn.commit()
@@ -592,7 +600,7 @@ def export_db_to_json(cfg: dict, output_path: str) -> None:
         conn.close()
 
 
-def write_ui_defect(cfg: dict, defect: dict) -> None:
+def write_ui_defect(project_name: str, cfg: dict, defect: dict) -> None:
     """
     Insert a single ui_defect into the MySQL database.
     """
@@ -602,10 +610,11 @@ def write_ui_defect(cfg: dict, defect: dict) -> None:
         cur.execute(
             """
             INSERT INTO ui_defects
-                (file_id, defect_type, severity, element_type, trigger_text, expected_text)
-            VALUES (%s, %s, %s, %s, %s, %s)
+                (project_name, file_id, defect_type, severity, element_type, trigger_text, expected_text)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
             (
+                project_name,
                 defect.get("file_id", 0),
                 defect.get("defect_type", ""),
                 defect.get("severity", ""),
@@ -623,7 +632,7 @@ def write_ui_defect(cfg: dict, defect: dict) -> None:
         conn.close()
 
 
-def write_accessibility_defect(cfg: dict, defect: dict) -> None:
+def write_accessibility_defect(project_name: str, cfg: dict, defect: dict) -> None:
     """
     Insert a single accessibility_defect into the MySQL database.
     """
@@ -633,10 +642,11 @@ def write_accessibility_defect(cfg: dict, defect: dict) -> None:
         cur.execute(
             """
             INSERT INTO accessibility_defects
-                (file_id, file_path, module, rule, defect_type, element, severity, line_number, confidence, scanned_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (project_name, file_id, file_path, module, rule, defect_type, element, severity, line_number, confidence, scanned_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
             (
+                project_name,
                 defect.get("file_id", 0),
                 defect.get("file_path", ""),
                 defect.get("module", ""),
@@ -658,7 +668,7 @@ def write_accessibility_defect(cfg: dict, defect: dict) -> None:
         conn.close()
 
 
-def write_eslint_flags(cfg: dict, eslint_results: list) -> dict:
+def write_eslint_flags(project_name: str, cfg: dict, eslint_results: list) -> dict:
     """
     Insert ESLint findings into the appropriate MySQL tables based on rule type.
     
@@ -712,10 +722,11 @@ def write_eslint_flags(cfg: dict, eslint_results: list) -> dict:
                 cur.execute(
                     """
                     INSERT INTO accessibility_defects
-                        (file_id, file_path, module, rule, defect_type, element, severity, line_number, confidence, scanned_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (project_name, file_id, file_path, module, rule, defect_type, element, severity, line_number, confidence, scanned_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                     (
+                        project_name,
                         file_id,
                         normalized_path,
                         cfg.get("module", ""),
@@ -733,10 +744,10 @@ def write_eslint_flags(cfg: dict, eslint_results: list) -> dict:
                 # Write to file_flags
                 cur.execute(
                     """
-                    INSERT INTO file_flags (file_id, flag_name, category, line_number)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO file_flags (project_name, file_id, flag_name, category, line_number)
+                    VALUES (%s, %s, %s, %s, %s)
                 """,
-                    (file_id, rule_id, "ESLINT", issue.get("line", 0)),
+                    (project_name, file_id, rule_id, "ESLINT", issue.get("line", 0)),
                 )
                 file_flags_written += 1
             

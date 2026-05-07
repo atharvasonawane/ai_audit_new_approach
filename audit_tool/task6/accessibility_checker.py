@@ -117,7 +117,7 @@ def check_css_outline(style_text: str, file_id: int, file_path: str, module_name
                     "severity": "CRITICAL",
                     "line_number": node.start_point[0] + 1
                 }
-                write_accessibility_defect(cfg, defect)
+                write_accessibility_defect(cfg["project_name"], cfg, defect)
                 report_list.append(defect)
         for child in node.children:
             walk_css(child)
@@ -225,7 +225,7 @@ def process_vue_file(file_path, cfg, report_list):
             "severity": severity,
             "line_number": node.start_point[0] + 1
         }
-        write_accessibility_defect(cfg, d)
+        write_accessibility_defect(cfg["project_name"], cfg, d)
         report_list.append(d)
 
     # Walk HTML AST for remaining checks
