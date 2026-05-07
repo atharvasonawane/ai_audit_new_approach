@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BarChart3, Files, FlagTriangleRight, LayoutDashboard, Settings } from 'lucide-vue-next'
+import { BarChart3, Files, FlagTriangleRight, LayoutDashboard, Settings, Library as LibraryIcon } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 
 import { cn } from '../../lib/utils'
@@ -26,40 +26,42 @@ defineProps<{
   <aside
     :class="
       cn(
-        'flex h-full w-[260px] flex-col border-r border-border/70 bg-background',
+        'flex h-full w-[260px] flex-col border-r border-border bg-card/30',
         $props.class,
       )
     "
   >
-    <div class="flex h-12 items-center px-4">
+    <div class="flex h-14 items-center px-5">
+      <div class="flex h-8 w-8 items-center justify-center rounded-md bg-foreground text-background mr-3">
+        <LibraryIcon class="h-4 w-4" v-if="LibraryIcon" />
+      </div>
       <div class="min-w-0">
-        <p class="truncate text-sm font-semibold tracking-tight text-foreground">
-          Code Audit Librarian
+        <p class="truncate text-sm font-bold tracking-tight text-foreground">
+          Audit Librarian
         </p>
-        <p class="truncate text-xs text-muted-foreground">Engineering intelligence</p>
       </div>
     </div>
 
-    <nav class="flex-1 px-2 py-2">
+    <nav class="flex-1 px-3 py-4 space-y-1">
       <RouterLink
         v-for="item in items"
         :key="item.to"
         :to="item.to"
-        class="group flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-        active-class="bg-accent text-foreground"
+        class="group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        active-class="bg-accent/50 text-foreground font-semibold"
       >
-        <component :is="item.icon" class="h-4 w-4 opacity-90" />
+        <component :is="item.icon" class="h-4 w-4" />
         <span class="truncate">{{ item.label }}</span>
       </RouterLink>
     </nav>
 
-    <div class="border-t border-border/70 p-2">
+    <div class="p-3">
       <RouterLink
         to="/settings"
-        class="group flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-        active-class="bg-accent text-foreground"
+        class="group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        active-class="bg-accent/50 text-foreground"
       >
-        <Settings class="h-4 w-4 opacity-90" />
+        <Settings class="h-4 w-4" />
         <span class="truncate">Settings</span>
       </RouterLink>
     </div>

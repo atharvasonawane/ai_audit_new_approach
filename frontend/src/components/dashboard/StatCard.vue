@@ -12,13 +12,13 @@ defineProps<{
 </script>
 
 <template>
-  <BaseCard :class="cn('p-5 transition-colors hover:bg-accent/20', $props.class)">
-    <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{{ label }}</p>
-    <div class="mt-2 flex items-baseline justify-between gap-3">
-      <p class="text-2xl font-semibold tracking-tight text-foreground">{{ value }}</p>
-      <p v-if="delta" class="text-xs font-medium text-muted-foreground">{{ delta }}</p>
+  <BaseCard :class="cn('p-6 transition-all duration-200 hover:bg-accent/40 hover:border-accent-foreground/20', $props.class)">
+    <p class="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">{{ label }}</p>
+    <div class="flex items-baseline justify-between gap-3">
+      <p class="text-3xl font-bold tracking-tight text-foreground">{{ value }}</p>
+      <p v-if="delta" class="text-sm font-medium text-emerald-500">{{ delta }}</p>
     </div>
-    <p v-if="hint" class="mt-2 text-xs text-muted-foreground">{{ hint }}</p>
+    <p v-if="hint" class="mt-2 text-sm text-muted-foreground">{{ hint }}</p>
     <slot />
   </BaseCard>
 </template>

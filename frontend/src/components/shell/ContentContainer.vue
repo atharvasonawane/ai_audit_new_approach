@@ -7,7 +7,7 @@ defineProps<{
 </script>
 
 <template>
-  <div :class="cn('mx-auto w-full max-w-[1200px] px-5 py-6 md:px-8', $props.class)">
+  <div :class="cn('mx-auto w-full max-w-[1200px] px-6 py-8 md:px-8 md:py-10', $props.class)">
     <slot />
   </div>
 </template>

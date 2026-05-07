@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import DashboardLayout from '../layouts/DashboardLayout.vue'
 import DashboardOverviewPage from '../pages/DashboardOverviewPage.vue'
+import FileExplorerPage from '../pages/FileExplorerPage.vue'
 import PlaceholderPage from '../pages/PlaceholderPage.vue'
 
 const router = createRouter({
@@ -28,11 +29,7 @@ const router = createRouter({
         {
           path: 'files',
           name: 'files',
-          component: PlaceholderPage,
-          props: {
-            title: 'Files',
-            description: 'File-level drill-down with flags, complexity, and API extraction evidence.',
-          },
+          component: FileExplorerPage,
         },
         {
           path: 'trends',

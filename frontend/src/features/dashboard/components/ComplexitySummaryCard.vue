@@ -9,31 +9,31 @@ defineProps<{
 </script>
 
 <template>
-  <InsightPanel title="Complexity summary" description="High-level complexity signals across components.">
-    <div class="grid gap-3 px-6 py-4 md:grid-cols-2">
+  <InsightPanel title="Complexity Architecture" description="Computed cyclomatic weights across Vue components.">
+    <div class="grid gap-4 px-6 py-6 md:grid-cols-2 bg-muted/20">
       <StatCard
         label="Components analyzed"
         :value="summary?.componentsAnalyzed ?? '—'"
         hint="Parsed Vue SFCs and scripts."
-        class="p-4"
+        class="bg-card shadow-sm hover:shadow-md"
       />
       <StatCard
         label="Avg complexity"
         :value="summary?.avgComplexity ?? '—'"
         hint="Average weighted complexity."
-        class="p-4"
+        class="bg-card shadow-sm hover:shadow-md"
       />
       <StatCard
         label="P95 complexity"
         :value="summary?.p95Complexity ?? '—'"
         hint="Tail risk for large files."
-        class="p-4"
+        class="bg-card shadow-sm hover:shadow-md"
       />
       <StatCard
         label="High complexity files"
         :value="summary?.highComplexityCount ?? '—'"
         hint="Needs refactor attention."
-        class="p-4"
+        class="bg-card border-destructive/30 shadow-sm hover:shadow-md"
       />
     </div>
   </InsightPanel>

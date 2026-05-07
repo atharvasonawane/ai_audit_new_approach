@@ -36,19 +36,19 @@ function shortDate(foundAt?: string) {
         <div
           v-for="item in recent"
           :key="item.id"
-          class="flex items-start justify-between gap-4 py-4 transition-colors hover:bg-accent/10 -mx-2 px-2 rounded-lg"
+          class="flex items-start justify-between gap-4 py-5 transition-all duration-200 hover:bg-accent/40 -mx-3 px-3 rounded-md"
         >
           <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <SeverityBadge :severity="severityPill(item.severity)" />
-              <p class="truncate text-sm font-medium">{{ item.category }}</p>
+            <div class="flex items-center gap-3">
+              <SeverityBadge :severity="severityPill(item.severity)" class="shadow-sm" />
+              <p class="truncate text-sm font-semibold tracking-tight">{{ item.category }}</p>
             </div>
-            <p class="mt-1 truncate text-xs text-muted-foreground">{{ item.file }}</p>
-            <p class="mt-2 text-xs text-muted-foreground">
-              {{ item.count }} signals
+            <p class="mt-1.5 truncate text-xs text-muted-foreground font-mono bg-card px-1.5 py-0.5 rounded-sm border border-border inline-block">{{ item.file }}</p>
+            <p class="mt-2 text-xs font-medium text-muted-foreground">
+              <span class="text-foreground font-semibold">{{ item.count }}</span> signals detected
             </p>
           </div>
-          <div class="shrink-0 text-xs text-muted-foreground">{{ shortDate(item.foundAt) }}</div>
+          <div class="shrink-0 text-xs font-mono text-muted-foreground font-medium pt-1">{{ shortDate(item.foundAt) }}</div>
         </div>
         <div v-if="recent.length === 0" class="py-6 text-sm text-muted-foreground">No data</div>
       </div>

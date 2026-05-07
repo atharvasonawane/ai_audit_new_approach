@@ -1,6 +1,6 @@
 <template>
   <article
-    class="rounded-xl border border-border/70 bg-card shadow-sm ring-1 ring-transparent transition-colors"
+    class="rounded-xl border border-border bg-card shadow-sm transition-all duration-200 hover:shadow-md"
   >
     <slot />
   </article>
