@@ -4,6 +4,7 @@ import DashboardLayout from '../layouts/DashboardLayout.vue'
 import DashboardOverviewPage from '../pages/DashboardOverviewPage.vue'
 import FileExplorerPage from '../pages/FileExplorerPage.vue'
 import FileDetailPage from '../pages/FileDetailPage.vue'
+import DefectsPage from '../pages/DefectsPage.vue'
 import PlaceholderPage from '../pages/PlaceholderPage.vue'
 
 const router = createRouter({
@@ -21,11 +22,7 @@ const router = createRouter({
         {
           path: 'defects',
           name: 'defects',
-          component: PlaceholderPage,
-          props: {
-            title: 'Defects',
-            description: 'Prioritized accessibility, Vue best-practice, and UI consistency issues.',
-          },
+          component: DefectsPage,
         },
         {
           path: 'files',
