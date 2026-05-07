@@ -12,3 +12,21 @@ export interface AuditFile {
   accessibility_defects: number
   health_score: number // computed conceptually
 }
+
+export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info'
+export type FindingCategory = 'accessibility' | 'complexity' | 'architecture' | 'security' | 'payload'
+
+export interface FileFinding {
+  id: string
+  line?: number
+  category: FindingCategory
+  severity: FindingSeverity
+  message: string
+  code_snippet?: string
+}
+
+export interface AuditFileDetail extends AuditFile {
+  findings: FileFinding[]
+  tags: string[]
+  last_analyzed: string
+}

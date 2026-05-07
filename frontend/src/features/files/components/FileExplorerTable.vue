@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { AuditFile } from '../types'
 import { cn } from '../../../lib/utils'
 import InsightPanel from '../../../components/dashboard/InsightPanel.vue'
@@ -8,6 +9,7 @@ const props = defineProps<{
   files: AuditFile[]
 }>()
 
+const router = useRouter()
 const sortCol = ref<keyof AuditFile | null>('health_score')
 const sortDesc = ref(false)
 const searchQuery = ref('')
@@ -85,7 +87,8 @@ function healthColor(score: number) {
             <tr
               v-for="file in filteredFiles"
               :key="file.id"
-              class="border-b border-border bg-card transition-all duration-200 hover:bg-accent/40 group"
+              class="border-b border-border bg-card transition-all duration-200 hover:bg-accent/40 group cursor-pointer"
+              @click="router.push(`/files/${file.id}`)"
             >
               <td class="px-6 py-3">
                 <div class="flex items-center gap-2">

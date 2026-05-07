@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import DashboardLayout from '../layouts/DashboardLayout.vue'
 import DashboardOverviewPage from '../pages/DashboardOverviewPage.vue'
 import FileExplorerPage from '../pages/FileExplorerPage.vue'
+import FileDetailPage from '../pages/FileDetailPage.vue'
 import PlaceholderPage from '../pages/PlaceholderPage.vue'
 
 const router = createRouter({
@@ -30,6 +31,11 @@ const router = createRouter({
           path: 'files',
           name: 'files',
           component: FileExplorerPage,
+        },
+        {
+          path: 'files/:id',
+          name: 'file-detail',
+          component: FileDetailPage,
         },
         {
           path: 'trends',
