@@ -15,7 +15,7 @@ module: null
 mql:
   confidence: HIGH
   pattern: \w+\.\[(\w+)\]
-project_name: digital_university
+project_name: new_university
 spelling:
   ignore_words:
   - DU

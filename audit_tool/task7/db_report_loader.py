@@ -48,50 +48,56 @@ def load_component_complexity(cfg: dict) -> list:
     SELECT * FROM vue_files
     Returns all file metrics.
     """
-    return _fetch_all(cfg, "SELECT * FROM vue_files")
+    project_name = cfg.get("project_name")
+    return _fetch_all(cfg, "SELECT * FROM vue_files WHERE project_name = %s", (project_name,))
 
 def load_api_calls(cfg: dict) -> list:
     """
     SELECT * FROM api_calls
     Returns all MQL calls found.
     """
-    return _fetch_all(cfg, "SELECT * FROM api_calls")
+    project_name = cfg.get("project_name")
+    return _fetch_all(cfg, "SELECT * FROM api_calls WHERE project_name = %s", (project_name,))
 
 def load_file_flags(cfg: dict) -> list:
     """
     SELECT * FROM file_flags
     Returns all flags per file.
     """
-    return _fetch_all(cfg, "SELECT * FROM file_flags")
+    project_name = cfg.get("project_name")
+    return _fetch_all(cfg, "SELECT * FROM file_flags WHERE project_name = %s", (project_name,))
 
 def load_ui_extractions(cfg: dict) -> list:
     """
     SELECT * FROM ui_extractions
     Returns all UI element data.
     """
-    return _fetch_all(cfg, "SELECT * FROM ui_extractions")
+    project_name = cfg.get("project_name")
+    return _fetch_all(cfg, "SELECT * FROM ui_extractions WHERE project_name = %s", (project_name,))
 
 def load_ui_defects(cfg: dict) -> list:
     """
     SELECT * FROM ui_defects
     Returns all UI consistency defects.
     """
-    return _fetch_all(cfg, "SELECT * FROM ui_defects")
+    project_name = cfg.get("project_name")
+    return _fetch_all(cfg, "SELECT * FROM ui_defects WHERE project_name = %s", (project_name,))
 
 def load_accessibility_defects(cfg: dict) -> list:
     """
     SELECT * FROM accessibility_defects
     Returns all accessibility violations.
     """
-    return _fetch_all(cfg, "SELECT * FROM accessibility_defects")
+    project_name = cfg.get("project_name")
+    return _fetch_all(cfg, "SELECT * FROM accessibility_defects WHERE project_name = %s", (project_name,))
 
 def load_all_issues_for_file(cfg: dict, file_path: str) -> dict:
     """
     Joins all tables for one specific file, returning everything known about it
     in a single dictionary using separate queries to construct the object.
     """
-    # Grab the baseline record
-    files = _fetch_all(cfg, "SELECT * FROM vue_files WHERE file_path = %s", (file_path,))
+    project_name = cfg.get("project_name")
+    files = _fetch_all(cfg, "SELECT * FROM vue_files WHERE project_name = %s AND file_path = %s", (project_name, file_path))
     if not files:
         return {}
     file_record = files[0]
@@ -116,14 +122,15 @@ def load_high_risk_files(cfg: dict) -> list:
         SELECT DISTINCT vf.file_path 
         FROM vue_files vf
         JOIN file_flags ff ON vf.id = ff.file_id
-        WHERE ff.flag_name IN (
+        WHERE vf.project_name = %s AND ff.flag_name IN (
             'MONOLITH_COMPONENT', 
             'CRITICAL_COMPONENT', 
             'VERY_LARGE_COMPONENT', 
             'EXCESSIVE_API_USAGE'
         )
     """
-    results = _fetch_all(cfg, query)
+    project_name = cfg.get("project_name")
+    results = _fetch_all(cfg, query, (project_name,))
     return [row["file_path"] for row in results]
 
 def search_files(cfg: dict, pattern: str) -> list:
@@ -131,7 +138,8 @@ def search_files(cfg: dict, pattern: str) -> list:
     Search for files matching a partial path or name.
     Useful for helping the agent find the exact file_path.
     """
-    query = "SELECT file_path FROM vue_files WHERE file_path LIKE %s LIMIT 10"
-    params = (f"%{pattern}%",)
+    query = "SELECT file_path FROM vue_files WHERE project_name = %s AND file_path LIKE %s LIMIT 10"
+    project_name = cfg.get("project_name")
+    params = (project_name, f"%{pattern}%")
     results = _fetch_all(cfg, query, params)
     return [row["file_path"] for row in results]

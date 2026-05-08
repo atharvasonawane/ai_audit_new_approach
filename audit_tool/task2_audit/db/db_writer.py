@@ -292,7 +292,7 @@ def write_file_result(project_name: str, cfg: dict, result: dict) -> None:
                 result.get("file_hash", ""),
             ),
         )
-        file_id = cur.lastrowid or _get_file_id(cur, filepath)
+        file_id = cur.lastrowid or _get_file_id(cur, project_name, filepath)
 
         # ── 2. Clear old api_calls and file_flags for this file ───────────
         cur.execute("DELETE FROM api_calls  WHERE file_id = %s", (file_id,))
@@ -346,9 +346,9 @@ def write_file_result(project_name: str, cfg: dict, result: dict) -> None:
         conn.close()
 
 
-def _get_file_id(cur, filepath: str) -> int:
-    """Fetch the id of an existing vue_files row by file_path."""
-    cur.execute("SELECT id FROM vue_files WHERE file_path = %s", (filepath,))
+def _get_file_id(cur, project_name: str, filepath: str) -> int:
+    """Fetch the id of an existing vue_files row by file_path and project_name."""
+    cur.execute("SELECT id FROM vue_files WHERE project_name = %s AND file_path = %s", (project_name, filepath))
     row = cur.fetchone()
     return row[0] if row else 0
 
@@ -388,7 +388,8 @@ def get_all_file_hashes(cfg: dict) -> dict:
     cur = conn.cursor()
     
     try:
-        cur.execute("SELECT file_path, file_hash, scanned_at FROM vue_files")
+        project_name = cfg.get("project_name")
+        cur.execute("SELECT file_path, file_hash, scanned_at FROM vue_files WHERE project_name = %s", (project_name,))
         rows = cur.fetchall()
         
         # Build dictionary with hash and timestamp
@@ -430,9 +431,10 @@ def check_file_hash_exists(cfg: dict, filepath: str, file_hash: str) -> bool:
     cur = conn.cursor()
     
     try:
+        project_name = cfg.get("project_name")
         cur.execute(
-            "SELECT COUNT(*) FROM vue_files WHERE file_path = %s AND file_hash = %s",
-            (filepath, file_hash)
+            "SELECT COUNT(*) FROM vue_files WHERE project_name = %s AND file_path = %s AND file_hash = %s",
+            (project_name, filepath, file_hash)
         )
         count = cur.fetchone()[0]
         return count > 0
@@ -491,7 +493,8 @@ def cleanup_orphaned_files(cfg: dict, base_path: str) -> dict:
             normalized_existing.add(normalize_path(file_path, base_path))
         
         # Get all file paths from database
-        cur.execute("SELECT id, file_path FROM vue_files")
+        project_name = cfg.get("project_name")
+        cur.execute("SELECT id, file_path FROM vue_files WHERE project_name = %s", (project_name,))
         db_files = cur.fetchall()
         
         # Find orphaned files (in DB but not on disk)
@@ -560,8 +563,10 @@ def export_db_to_json(cfg: dict, output_path: str) -> None:
     }
 
     try:
+        project_name = cfg.get("project_name")
+        
         # 1. vue_files
-        cur.execute("SELECT * FROM vue_files")
+        cur.execute("SELECT * FROM vue_files WHERE project_name = %s", (project_name,))
         files = cur.fetchall()
         for f in files:
             if isinstance(f.get("scanned_at"), datetime):
@@ -569,19 +574,19 @@ def export_db_to_json(cfg: dict, output_path: str) -> None:
         export_data["vue_files"] = files
 
         # 2. api_calls
-        cur.execute("SELECT * FROM api_calls")
+        cur.execute("SELECT * FROM api_calls WHERE project_name = %s", (project_name,))
         export_data["api_calls"] = cur.fetchall()
 
         # 3. file_flags
-        cur.execute("SELECT * FROM file_flags")
+        cur.execute("SELECT * FROM file_flags WHERE project_name = %s", (project_name,))
         export_data["file_flags"] = cur.fetchall()
 
         # 4. ui_defects
-        cur.execute("SELECT * FROM ui_defects")
+        cur.execute("SELECT * FROM ui_defects WHERE project_name = %s", (project_name,))
         export_data["ui_defects"] = cur.fetchall()
 
         # 5. accessibility_defects
-        cur.execute("SELECT * FROM accessibility_defects")
+        cur.execute("SELECT * FROM accessibility_defects WHERE project_name = %s", (project_name,))
         defects = cur.fetchall()
         for d in defects:
             if isinstance(d.get("scanned_at"), datetime):
@@ -707,7 +712,7 @@ def write_eslint_flags(project_name: str, cfg: dict, eslint_results: list) -> di
                 normalized_path = file_path.replace("\\", "/")
             
             # Look up file_id from vue_files
-            file_id = _get_file_id(cur, normalized_path)
+            file_id = _get_file_id(cur, project_name, normalized_path)
             
             if not file_id:
                 logger.warning("[db_writer] Could not find file_id for '%s' — skipping ESLint finding", normalized_path)

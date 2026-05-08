@@ -111,7 +111,8 @@ class UIConsistencyChecker:
         conn = _get_connection(self.cfg)
         cur = conn.cursor()
         try:
-            cur.execute("SELECT id, file_path FROM vue_files")
+            project_name = self.cfg.get("project_name")
+            cur.execute("SELECT id, file_path FROM vue_files WHERE project_name = %s", (project_name,))
             return {row[1].replace('\\', '/').lower(): row[0] for row in cur.fetchall()}
         except Exception as e:
             logger.error("Failed to build file map: %s", e)
@@ -135,12 +136,14 @@ class UIConsistencyChecker:
             conn = _get_connection(self.cfg)
             cur = conn.cursor(dictionary=True)
             
-            # Query all ui_extractions joined with vue_files to get file paths
+            project_name = self.cfg.get("project_name")
+            # Query ui_extractions joined with vue_files, scoped to this project
             cur.execute("""
                 SELECT vf.file_path, ue.element_category, ue.text_content, ue.css_class, ue.text_type
                 FROM ui_extractions ue
                 JOIN vue_files vf ON ue.file_id = vf.id
-            """)
+                WHERE ue.project_name = %s AND vf.project_name = %s
+            """, (project_name, project_name))
             
             rows = cur.fetchall()
             
@@ -206,9 +209,14 @@ class UIConsistencyChecker:
                     file_ids.append(fid)
             
             if file_ids:
-                # Delete ui_defects for these file_ids
+                # Delete ui_defects for these file_ids scoped to this project
+                project_name = self.cfg.get("project_name")
                 format_strings = ','.join(['%s'] * len(file_ids))
-                cur.execute(f"DELETE FROM ui_defects WHERE file_id IN ({format_strings})", tuple(file_ids))
+                params = [project_name] + list(file_ids)
+                cur.execute(
+                    f"DELETE FROM ui_defects WHERE project_name = %s AND file_id IN ({format_strings})",
+                    params
+                )
                 deleted_count = cur.rowcount
                 conn.commit()
                 logger.info("Cleared %d existing UI defect entries for %d files", deleted_count, len(file_ids))

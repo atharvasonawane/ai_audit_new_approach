@@ -288,7 +288,8 @@ def main(dirty_files=None):
         cur = conn.cursor()
         
         # Create a robust pathname map bypassing Windows slash and casing weirdness
-        cur.execute("SELECT id, file_path FROM vue_files")
+        project_name = cfg.get("project_name")
+        cur.execute("SELECT id, file_path FROM vue_files WHERE project_name = %s", (project_name,))
         file_map = {row[1].replace('\\', '/').lower(): row[0] for row in cur.fetchall()}
         
         # For incremental mode: delete existing entries for dirty files before inserting new ones
@@ -303,9 +304,13 @@ def main(dirty_files=None):
                         break
             
             if file_ids_to_clear:
-                # Delete existing ui_extractions for these file_ids
+                # Delete existing ui_extractions for these file_ids scoped to this project
                 format_strings = ','.join(['%s'] * len(file_ids_to_clear))
-                cur.execute(f"DELETE FROM ui_extractions WHERE file_id IN ({format_strings})", tuple(file_ids_to_clear))
+                params = [project_name] + list(file_ids_to_clear)
+                cur.execute(
+                    f"DELETE FROM ui_extractions WHERE project_name = %s AND file_id IN ({format_strings})",
+                    params
+                )
                 deleted_count = cur.rowcount
                 logger.info(f"Cleared {deleted_count} existing UI extraction entries for {len(file_ids_to_clear)} dirty files")
         
@@ -322,14 +327,15 @@ def main(dirty_files=None):
                 logger.warning(f"Could not link DB record for {res.get('file')}")
             
             if file_id:
+                project_name = cfg.get("project_name")
                 for btn in res["buttons"]:
-                    cur.execute("INSERT INTO ui_extractions (file_id, element_category, text_content, css_class, text_type) VALUES (%s, %s, %s, %s, %s)", (file_id, "button", btn["text"], btn.get("class", ""), btn["type"]))
+                    cur.execute("INSERT INTO ui_extractions (project_name, file_id, element_category, text_content, css_class, text_type) VALUES (%s, %s, %s, %s, %s, %s)", (project_name, file_id, "button", btn["text"], btn.get("class", ""), btn["type"]))
                     elements_inserted += 1
                 for hdr in res["headers"]:
-                    cur.execute("INSERT INTO ui_extractions (file_id, element_category, text_content, css_class, text_type) VALUES (%s, %s, %s, %s, %s)", (file_id, "header", hdr["text"], "", hdr["type"]))
+                    cur.execute("INSERT INTO ui_extractions (project_name, file_id, element_category, text_content, css_class, text_type) VALUES (%s, %s, %s, %s, %s, %s)", (project_name, file_id, "header", hdr["text"], "", hdr["type"]))
                     elements_inserted += 1
                 for vt in res["visibleTexts"]:
-                    cur.execute("INSERT INTO ui_extractions (file_id, element_category, text_content, css_class, text_type) VALUES (%s, %s, %s, %s, %s)", (file_id, "visible_text", vt["text"], "", vt["type"]))
+                    cur.execute("INSERT INTO ui_extractions (project_name, file_id, element_category, text_content, css_class, text_type) VALUES (%s, %s, %s, %s, %s, %s)", (project_name, file_id, "visible_text", vt["text"], "", vt["type"]))
                     elements_inserted += 1
                     
         conn.commit()

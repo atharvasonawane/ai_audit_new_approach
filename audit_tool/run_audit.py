@@ -65,6 +65,8 @@ cfg = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
 if "project_name" not in cfg:
     logger.error("Error: 'project_name' key must exist at the root level of project_config.yaml")
     sys.exit(1)
+
+project_name = cfg["project_name"]
 # Dynamically set the module name. Priority:
 # 1. Explicit 'module' field in config (if set and non-empty)
 # 2. 'project_name' field from config
@@ -141,7 +143,7 @@ def main():
             continue
             
         try:
-            write_file_result(cfg["project_name"], cfg, result)
+            write_file_result(project_name, cfg, result)
             written_count += 1
         except Exception as e:
             logger.error("DB write failed for %s: %s", result.get("file", "?"), e)
@@ -160,7 +162,7 @@ def main():
                 eslint_results = parse_eslint_results()
                 if eslint_results:
                     from db.db_writer import write_eslint_flags
-                    eslint_counts = write_eslint_flags(cfg["project_name"], cfg, eslint_results)
+                    eslint_counts = write_eslint_flags(project_name, cfg, eslint_results)
                     logger.info("  Written %d ESLint flags to file_flags, %d to accessibility_defects",
                                 eslint_counts["file_flags"], eslint_counts["accessibility_defects"])
                     print(f"ESLint found {eslint_counts['accessibility_defects']} accessibility issues")
@@ -213,9 +215,60 @@ def main():
     print()
     print(f"  DB   : {cfg['db']['database']}.vue_files ({len(processed_results)} new/updated rows)")
 
-    # NEW STEP: Extract UI elements (Task 4) - GATED to only dirty files
-    # Skip if no dirty files (nothing changed)
-    if dirty_files:
+    # NEW STEP: Extract UI elements (Task 4)
+    # Gate 1: dirty files (changed content)
+    # Gate 2: files in vue_files for this project with NO ui_extractions rows yet
+    #         (covers the case where the project_name changed but files are unchanged)
+    task4_files = list(dirty_files)  # start with dirty files
+
+    try:
+        from db.db_writer import _get_connection
+        _conn = _get_connection(cfg)
+        _cur = _conn.cursor()
+        _cur.execute(
+            """
+            SELECT vf.file_path
+            FROM vue_files vf
+            LEFT JOIN ui_extractions ue ON vf.id = ue.file_id AND ue.project_name = %s
+            WHERE vf.project_name = %s AND ue.id IS NULL
+            """,
+            (project_name, project_name)
+        )
+        missing_rows = _cur.fetchall()
+        _cur.close()
+        _conn.close()
+
+        if missing_rows:
+            # Reconstruct absolute paths from relative DB paths
+            missing_abs = []
+            for (rel_path,) in missing_rows:
+                # normalize_path stores paths relative to BASE_PATH e.g. 'components/Foo.vue'
+                # so the absolute path is: Path(BASE_PATH) / rel_path (NOT .parent)
+                candidate = Path(BASE_PATH) / rel_path
+                if candidate.exists():
+                    missing_abs.append(str(candidate))
+                else:
+                    # Fallback: filename search under BASE_PATH
+                    fname = Path(rel_path).name
+                    found = list(Path(BASE_PATH).rglob(fname))
+                    if found:
+                        missing_abs.append(str(found[0]))
+                    else:
+                        logger.warning("Task 4: could not resolve path for DB entry '%s'", rel_path)
+            # Add without duplicating already-dirty files
+            existing_set = {str(Path(f).resolve()) for f in task4_files}
+            for p in missing_abs:
+                if str(Path(p).resolve()) not in existing_set:
+                    task4_files.append(p)
+            if missing_abs:
+                logger.info(
+                    "Task 4: found %d files in vue_files with no ui_extractions for project '%s' — adding to Task 4 run",
+                    len(missing_abs), project_name
+                )
+    except Exception as e:
+        logger.warning("Could not query for missing ui_extractions: %s", e)
+
+    if task4_files:
         try:
             if str(BASE / "task4") not in sys.path:
                 sys.path.insert(0, str(BASE / "task4"))
@@ -225,12 +278,13 @@ def main():
             print("=" * 65)
             print("  TASK 4: VUE UI EXTRACTION SCANNER")
             print("=" * 65)
-            logger.info("Running targeted Task 4 UI extraction on %d dirty files...", len(dirty_files))
-            task4_main(dirty_files=dirty_files)
+            logger.info("Running Task 4 UI extraction on %d files (%d dirty, %d missing extractions)...",
+                        len(task4_files), len(dirty_files), len(task4_files) - len(dirty_files))
+            task4_main(dirty_files=task4_files)
         except Exception as e:
             logger.error("Failed to run Task 4 UI Extractor: %s", e)
     else:
-        logger.info("Skipping Task 4 UI Extraction - no dirty files (all files unchanged)")
+        logger.info("Skipping Task 4 UI Extraction - no dirty files and all ui_extractions up to date")
 
     # 7. Export Database to JSON
     db_json_path = BASE / "task2_db_export.json"
