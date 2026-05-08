@@ -21,16 +21,15 @@
 * **Dev tools:** Virtual environment (env), dotenv (Environment variable management), ESLint (Integrated for Vue best practices and accessibility checks)
 
 ## 3. Architecture
-* **Overall architecture:** A monolithic ETL (Extract, Transform, Load) pipeline coupled with a monolithic web dashboard.
+* **Overall architecture:** A multi-tenant ETL (Extract, Transform, Load) pipeline coupled with a monolithic web dashboard.
 * **Data flow:** 
-  1. The orchestrator (
-un_audit.py) reads configuration from project_config.yaml.
-  2. Parses target .vue and .js files using the 	ask2_audit extractors (Tree-sitter AST parsing).
-  3. Runs ESLint scan via subprocess to capture Vue best practices and accessibility issues, parsing JSON output into file_flags and accessibility_defects tables.
-  4. Hands data to modular sub-tasks (	ask3, 	ask5, 	ask7) to evaluate complexity, UI usage, and consolidated issue detection.
-  5. Stores results into MySQL tables and JSON report files.
-  6. The Flask dashboard (
-eport_server.py) reads the aggregated JSON data and DB to present a visual health score and defect dashboard.
+  1. The orchestrator (run_audit.py) reads configuration from project_config.yaml, extracting a mandatory `project_name`.
+  2. Sets up or verifies the database schema, ensuring all tables support multi-tenancy.
+  3. Parses target .vue and .js files using the task2_audit extractors (Tree-sitter AST parsing).
+  4. Runs ESLint scan via subprocess to capture Vue best practices and accessibility issues, parsing JSON output into file_flags and accessibility_defects tables (scoped by project_name).
+  5. Hands data to modular sub-tasks (task3, task4, task5, task7) to evaluate complexity, UI usage, and consolidated issue detection.
+  6. Stores results into MySQL tables and JSON report files, using `project_name` for isolation.
+  7. The Flask dashboard (report_server.py) reads the aggregated JSON data and DB to present a visual health score and defect dashboard, filtered by project.
 * **Key design patterns used:** 
   * **Pipeline/ETL Pattern:** For chaining parsing, linting, and reporting stages.
   * **Strategy/Plugin Pattern:** Task-based isolation (	ask3 through 	ask7) handling distinct audit categories independently.
@@ -81,12 +80,12 @@ ender_template locally (/ route).
 
 ## 8. Database Schema
 * **Tables:**
-  * vue_files: Stores metadata, line counts, and paths of parsed codebase components. Columns include: script_lines, template_lines, methods, computed, watchers, api_total, api_mounted, child_components, max_nesting_depth, payload_keys, payload_depth, payload_size_kb, flag_count, confidence, scanned_at.
-  * api_calls: Tracks API type, method name, full match string, in_mounted flag, in_loop flag (for loop-context detection), and line_number per call.
-  * file_flags: Records defect categories and flag names associated with scanned files.
-  * ui_extractions, ui_defects, accessibility_defects: Store Task 4, 5, and 6 findings respectively.
+  * vue_files: Stores metadata, line counts, and paths of parsed codebase components. Columns include: project_name (Part of PK), script_lines, template_lines, methods, computed, watchers, api_total, api_mounted, child_components, max_nesting_depth, payload_keys, payload_depth, payload_size_kb, flag_count, confidence, scanned_at.
+  * api_calls: Tracks API type, method name, full match string, in_mounted flag, in_loop flag (for loop-context detection), line_number, and project_name.
+  * file_flags: Records defect categories, flag names, and project_name associated with scanned files.
+  * ui_extractions, ui_defects, accessibility_defects: Store Task 4, 5, and 6 findings respectively, all scoped by project_name.
 * **Relationships:** api_calls, file_flags, ui_extractions, ui_defects, and accessibility_defects are all foreign-keyed to vue_files(id) with ON DELETE CASCADE.
-* **Persistence strategy:** Tables use CREATE TABLE IF NOT EXISTS. Rows are upserted via INSERT ... ON DUPLICATE KEY UPDATE keyed on the unique file_path column, so re-running the audit updates existing rows without duplicating them.
+* **Persistence strategy:** Tables use CREATE TABLE IF NOT EXISTS. Rows are upserted via INSERT ... ON DUPLICATE KEY UPDATE. The `vue_files` table uses a composite UNIQUE key on `(project_name, file_path)` to ensure robust isolation across multiple projects in the same database. Data is always scoped by `project_name` during SELECT, INSERT, and DELETE operations.
 
 ## 9. Current Status
 
@@ -132,10 +131,16 @@ ender_template locally (/ route).
   - Line number calculation for pattern-based flags
   - Structural flags use line_number = 0
   - Includes line numbers in JSON exports
-  - Note: Precision acceptable, not 100% exact for all edge cases
+
+* **Step 7 — Multi-Tenant Architecture (Complete and Verified):**
+  - Added strict `project_name` validation to `project_config.yaml`.
+  - Updated database DDL to include `project_name` in all tables with proper indexing.
+  - Implemented project-scoped Delta Scanning (Hash Map only loads current project hashes).
+  - Fixed cross-tenant data leaks in Task 4 (UI Extraction) and Task 5 (UI Consistency) by scoping DELETE and INSERT operations.
+  - Resolved "skipping Task 4" bug by implementing a missing-extractions fallback that queries for unscanned files in the current project.
+  - Corrected absolute path resolution in orchestrator to match normalized database paths.
 
 * **Extraction Pipeline Stability Fixes:**
-  - Fixed Task 5 incremental scan skip bug by mapping OS absolute paths to database relative paths using `.endswith()`.
   - Resolved Windows CLI length limits (8191 chars) in ESLint extraction by chunking files into batches of 30.
   - Fixed `[WinError 2]` for `npx` execution natively on Windows using `shell=True`.
 
@@ -177,9 +182,10 @@ The pipeline implements a sophisticated two-step filtering system to eliminate r
 - Provides content-level accuracy for change detection
 
 **In-Memory Hash Map**
-- Single SQL query: `SELECT file_path, file_hash, scanned_at FROM vue_files`
+- Single SQL query: `SELECT file_path, file_hash, scanned_at FROM vue_files WHERE project_name = %s`
 - Python dictionary for O(1) lookup time
 - Eliminates 113+ individual database round trips per scan
+- **Project Isolation**: The hash map only contains data for the current project, ensuring that file changes in one project don't trigger false positives/negatives in another.
 
 **Task-Level Gating**
 - Tasks 4 (UI Extraction) and 5 (UI Consistency) only process "dirty files"
