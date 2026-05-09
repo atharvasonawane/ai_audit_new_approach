@@ -1,0 +1,3 @@
+python-dotenv
+pyyaml
+tree_sitter_languages

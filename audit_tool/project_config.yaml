@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────
+# Code Audit Librarian — Project Configuration
+# ─────────────────────────────────────────────────────────────
+
+project:
+  name: "my-vue-app"
+  target_paths:
+    - "src/components"
+    - "src/views"
+    - "src/pages"
+    - "src/services"
+    - "src/composables"
+    - "src/router"
+    - "src/store"
+  exclude_paths:
+    - "node_modules"
+    - "dist"
+    - "coverage"
+    - ".git"
+
+scout:
+  file_extensions: [".vue", ".js"]
+  eslint_config_path: ".eslintrc.js"
+  eslint_batch_size: 30
+  parallel_workers: 8
+
+ai:
+  # Provider: "openwebui" or "ollama"
+  # When using openwebui, credentials are read from .env:
+  #   OPENWEBUI_BASE_URL, OPENWEBUI_API_KEY, LLM_MODEL
+  provider: "openwebui"
+  temperature: 0.2
+  timeout_seconds: 90
+  complex_file_threshold_lines: 150
+  batch_size_simple_files: 8
+  max_retries: 1
+
+report:
+  output_path: "audit_report.html"
+  top_offenders_count: 10
+  auto_open_browser: true
