@@ -14,6 +14,10 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import argparse
 import warnings
 from dataclasses import dataclass
