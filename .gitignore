@@ -48,3 +48,27 @@ eslint_report.json
 scan.log
 audit_report.html
 skeleton_map.txt
+
+# Explicit safety ignores (secrets/data)
+.env
+audit_tool/audit_history.db
+audit_tool/scan.log
+
+# Local/enterprise codebases copied into this workspace
+StudentManagement/
+
+# Local test/dummy projects and scripts
+test_project/
+test_data/
+test_stage*.py
+run_test.bat
+
+# Large vendored/build artifacts
+audit_tool/scout/vendor/
+audit_tool/scout/build/
+
+# Repo-local frontend app (not part of Stage 3/4 commit)
+frontend/
+
+# Duplicate/extra requirements files
+audit_tool/requirements.txt

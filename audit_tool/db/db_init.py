@@ -19,7 +19,7 @@ Or run directly to bootstrap the DB:
 import sqlite3
 from pathlib import Path
 
-from utils.logger import get_logger
+from audit_tool.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
