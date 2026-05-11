@@ -70,11 +70,18 @@ def _chat_completions_url(base_url: str) -> str:
     return u + "/chat/completions"
 
 def _call_llm(url: str, api_key: str, payload: dict) -> str:
-    body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("User-Agent", "CodeAuditLibrarian/1.0")
+    payload_bytes = json.dumps(payload).encode('utf-8')
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "CodeAuditLibrarian/1.0"
+    }
+    req = urllib.request.Request(
+        url=url,
+        data=payload_bytes,
+        headers=headers,
+        method='POST'
+    )
 
     try:
         with urllib.request.urlopen(req, timeout=90) as resp:

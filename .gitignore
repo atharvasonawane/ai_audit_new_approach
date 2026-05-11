@@ -72,3 +72,4 @@ frontend/
 
 # Duplicate/extra requirements files
 audit_tool/requirements.txt
+PROGRESS_SUMMARY.md
