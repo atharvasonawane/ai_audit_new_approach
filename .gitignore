@@ -67,8 +67,8 @@ run_test.bat
 audit_tool/scout/vendor/
 audit_tool/scout/build/
 
-# Repo-local frontend app (not part of Stage 3/4 commit)
-frontend/
+# Repo-local frontend app (now tracked for Stage 9)
+# frontend/
 
 # Duplicate/extra requirements files
 audit_tool/requirements.txt
