@@ -1,10 +1,6 @@
 base_path: C:/Users/Atharvaso/Desktop/StudentManagement/StudentManagement/client/app/src
 db:
-  database: code_audit_db
-  host: localhost
-  password: ''
-  port: 3306
-  user: root
+  path: audit_history.db
 generic_api:
   confidence: MEDIUM
   patterns:

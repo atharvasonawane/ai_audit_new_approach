@@ -323,6 +323,27 @@ def write_eslint_results(
 
         conn.commit()
 
+        # Update eslint_flag_count in vue_files for all touched files
+        for vue_file_id in touched_files:
+            # Count non-accessibility flags (category = 'eslint')
+            flag_count_row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM file_flags
+                WHERE vue_file_id = ? AND category = 'eslint'
+                """,
+                (vue_file_id,),
+            ).fetchone()
+            flag_count = flag_count_row["cnt"] if flag_count_row else 0
+            
+            # Update vue_files
+            conn.execute(
+                "UPDATE vue_files SET eslint_flag_count = ? WHERE id = ?",
+                (flag_count, vue_file_id),
+            )
+        
+        conn.commit()
+
     return {
         "file_flags": file_flags_written,
         "accessibility_defects": accessibility_written,

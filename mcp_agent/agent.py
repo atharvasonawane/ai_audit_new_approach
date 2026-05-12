@@ -71,8 +71,10 @@ def _normalize_path(file_path: str, base_path: str) -> str:
 def _resolve_base_url(base_url: str) -> str:
     if not base_url:
         raise ValueError("OPENWEBUI_BASE_URL is required")
-    if base_url.endswith("/api/v1"):
+    # Return as-is if already ends with /api/v1 or /openai/v1 (Groq format)
+    if base_url.endswith("/api/v1") or base_url.endswith("/openai/v1"):
         return base_url
+    # Convert /v1 to /api/v1 for OpenWebUI/Ollama compatibility
     if base_url.endswith("/v1"):
         return base_url[: -len("/v1")] + "/api/v1"
     return base_url.rstrip("/") + "/api/v1"
@@ -428,7 +430,8 @@ async def generate_executive_synthesis(project_name: str) -> None:
 
     base_url = _resolve_base_url(os.getenv("OPENWEBUI_BASE_URL", ""))
     api_key = os.getenv("OPENWEBUI_API_KEY", "")
-    llm = OpenAI(base_url=base_url, api_key=api_key)
+    timeout = int(os.getenv("LLM_TIMEOUT_SECONDS", "90"))
+    llm = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
 
     system_prompt = (
         "You are a Principal Software Architect preparing an executive summary for a development team "
@@ -883,6 +886,13 @@ async def _run_prompt_only(
     }
 
     context = _to_jsonable(context)
+    
+    # Truncate raw_source to reduce token usage for online LLMs with limits
+    # Keep first 2000 characters for context, indicate truncation
+    if "raw_source" in context and isinstance(context["raw_source"], str):
+        raw_len = len(context["raw_source"])
+        if raw_len > 2000:
+            context["raw_source"] = context["raw_source"][:2000] + "\n\n... [truncated for token limits] ..."
 
     system_prompt = (
         "You are a JSON generator. You output ONLY valid JSON. No other text. "
@@ -1278,6 +1288,23 @@ def run_full_codebase_audit() -> int:
         return run_id
 
     complex_files, simple_files = _split_complex_simple(paths_rows)
+    
+    # Apply file limit if configured (for testing with online LLMs)
+    file_limit = int(os.getenv("AI_FILE_LIMIT", "0"))
+    if file_limit > 0:
+        total_files = len(complex_files) + len(simple_files)
+        if total_files > file_limit:
+            # Prioritize complex files, then simple files
+            limited_complex = complex_files[:min(len(complex_files), file_limit)]
+            remaining_limit = file_limit - len(limited_complex)
+            limited_simple = simple_files[:remaining_limit]
+            complex_files = limited_complex
+            simple_files = limited_simple
+            print(
+                f"[AI Agent] File limit applied: processing {len(complex_files)} complex + {len(simple_files)} simple "
+                f"(limit: {file_limit}, total available: {total_files})"
+            )
+    
     print(
         f"[AI Agent] Queue: {len(complex_files)} complex (script_lines>={SCRIPT_LINES_COMPLEX_THRESHOLD}), "
         f"{len(simple_files)} simple."
