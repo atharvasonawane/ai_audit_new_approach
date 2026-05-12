@@ -26,11 +26,19 @@ from dotenv import load_dotenv
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 BASE = Path(__file__).parent
+PROJECT_ROOT = BASE.parent
 TASK2_BASE = BASE / "task2_audit"
 CONFIG_PATH = str(BASE / "config" / "project_config.yaml")
 
-# Insert task2_audit into sys.path so inner imports (extractors, db) resolve perfectly
-sys.path.insert(0, str(TASK2_BASE))
+# Ensure the project root is on sys.path so the SQLite db package resolves first
+if str(PROJECT_ROOT) in sys.path:
+    sys.path.remove(str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Insert task2_audit into sys.path so inner imports (extractors) resolve
+if str(TASK2_BASE) in sys.path:
+    sys.path.remove(str(TASK2_BASE))
+sys.path.insert(1, str(TASK2_BASE))
 
 import yaml
 
@@ -63,7 +71,9 @@ logger = logging.getLogger("run_audit")
 cfg = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
 
 if "project_name" not in cfg:
-    logger.error("Error: 'project_name' key must exist at the root level of project_config.yaml")
+    logger.error(
+        "Error: 'project_name' key must exist at the root level of project_config.yaml"
+    )
     sys.exit(1)
 
 project_name = cfg["project_name"]
@@ -102,7 +112,8 @@ if not Path(BASE_PATH).exists():
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 from extractors.orchestrator import scan_all_vue_files
-from db.db_writer import setup_schema, write_file_result, export_db_to_json, get_all_file_hashes
+from db.db_init import init_db
+from db.db_writer import get_all_file_hashes, write_eslint_results, write_scan_result
 from extractors.eslint_extractor import run_eslint_scan, parse_eslint_results
 
 
@@ -110,62 +121,82 @@ from extractors.eslint_extractor import run_eslint_scan, parse_eslint_results
 def main():
     print()
     print("=" * 65)
+    sqlite_path = Path(cfg.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db"))
+
     print("  Code Audit Librarian — Full Project Scan")
     print(f"  Source : {BASE_PATH}")
-    print(f"  DB     : {cfg['db']['database']} @ {cfg['db']['host']}")
+    print(f"  SQLite : {sqlite_path}")
     print(f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 65)
 
-    # 1. Setup DB schema
-    logger.info("Setting up database schema...")
-    setup_schema(cfg)
+    # 1. Setup SQLite schema
+    logger.info("Setting up SQLite schema...")
+    init_db(sqlite_path)
 
     # 2. Load known file hashes from database into memory for fast lookup
     logger.info("Loading known file hashes from database into memory...")
-    known_hashes = get_all_file_hashes(cfg)
-    logger.info("Loaded %d known file hashes into memory for incremental auditing", len(known_hashes))
+    known_hashes = get_all_file_hashes(project_name, sqlite_path)
+    logger.info(
+        "Loaded %d known file hashes into memory for incremental auditing",
+        len(known_hashes),
+    )
 
     # 3. Scan all files (with incremental auditing using in-memory hash lookup)
     start = time.time()
     logger.info("Starting incremental scan...")
     results, dirty_files = scan_all_vue_files(BASE_PATH, cfg, CONFIG_PATH, known_hashes)
     elapsed = time.time() - start
-    logger.info("Incremental scan complete in %.1fs — %d files found, %d processed.", elapsed, len(results), len(dirty_files))
+    logger.info(
+        "Incremental scan complete in %.1fs — %d files found, %d processed.",
+        elapsed,
+        len(results),
+        len(dirty_files),
+    )
     print(f"\n[DEBUG] Total files marked as dirty: {len(dirty_files)}")
 
     # 4. Write to DB (only dirty files)
-    logger.info("Writing dirty file results to MySQL...")
+    logger.info("Writing dirty file results to SQLite...")
     errors = 0
     written_count = 0
     for i, result in enumerate(results, 1):
         # Skip files that were unchanged (already in DB)
         if result.get("skipped"):
             continue
-            
+
         try:
-            write_file_result(project_name, cfg, result)
+            write_scan_result(project_name, cfg, result, sqlite_path)
             written_count += 1
         except Exception as e:
             logger.error("DB write failed for %s: %s", result.get("file", "?"), e)
             errors += 1
         if written_count > 0 and written_count % 20 == 0:
             logger.info("  Written %d dirty files...", written_count)
-    
-    logger.info("DB write complete: %d dirty files written, %d errors", written_count, errors)
+
+    logger.info(
+        "DB write complete: %d dirty files written, %d errors", written_count, errors
+    )
 
     # 5. Run ESLint scan and save results to DB (targeted for dirty files only)
     if dirty_files:
-        logger.info("Running targeted ESLint scan on %d dirty files...", len(dirty_files))
+        logger.info(
+            "Running targeted ESLint scan on %d dirty files...", len(dirty_files)
+        )
         try:
             scan_ok = run_eslint_scan(BASE_PATH, dirty_files)
             if scan_ok:
                 eslint_results = parse_eslint_results()
                 if eslint_results:
-                    from db.db_writer import write_eslint_flags
-                    eslint_counts = write_eslint_flags(project_name, cfg, eslint_results)
-                    logger.info("  Written %d ESLint flags to file_flags, %d to accessibility_defects",
-                                eslint_counts["file_flags"], eslint_counts["accessibility_defects"])
-                    print(f"ESLint found {eslint_counts['accessibility_defects']} accessibility issues")
+                    eslint_counts = write_eslint_results(
+                        project_name, cfg, eslint_results, sqlite_path
+                    )
+                    logger.info(
+                        "  Written %d ESLint flags to file_flags, %d to accessibility_defects",
+                        eslint_counts["file_flags"],
+                        eslint_counts["accessibility_defects"],
+                    )
+                    print(
+                        f"ESLint found {eslint_counts['accessibility_defects']} accessibility issues"
+                    )
                 else:
                     logger.info("  No ESLint issues found in dirty files")
             else:
@@ -181,7 +212,7 @@ def main():
     # Only count flags from files that were actually processed (not skipped)
     processed_results = [r for r in results if not r.get("skipped")]
     skipped_results = [r for r in results if r.get("skipped")]
-    
+
     total_flags = sum(r["flags_count"] for r in processed_results)
     ok = [r for r in processed_results if not r.get("error")]
     flagged = [r for r in ok if r["flags_count"] > 0]
@@ -208,12 +239,17 @@ def main():
     print("  " + "-" * 62)
     for r in top10:
         fname = Path(r["file"]).name
-        flag_names = [f["flag"] if isinstance(f, dict) else f for f in r['flags_triggered']]
+        flag_names = [
+            f["flag"] if isinstance(f, dict) else f for f in r["flags_triggered"]
+        ]
         print(
             f"  {fname:<45} {r['flags_count']:>5}  {', '.join(flag_names[:3])}{'...' if len(flag_names) > 3 else ''}"
         )
     print()
-    print(f"  DB   : {cfg['db']['database']}.vue_files ({len(processed_results)} new/updated rows)")
+    print(f"  DB   : sqlite ({len(processed_results)} new/updated rows)")
+
+    logger.info("Skipping legacy Task 3-7 pipeline (disabled for SQLite migration)")
+    return
 
     # NEW STEP: Extract UI elements (Task 4)
     # Gate 1: dirty files (changed content)
@@ -223,6 +259,7 @@ def main():
 
     try:
         from db.db_writer import _get_connection
+
         _conn = _get_connection(cfg)
         _cur = _conn.cursor()
         _cur.execute(
@@ -232,7 +269,7 @@ def main():
             LEFT JOIN ui_extractions ue ON vf.id = ue.file_id AND ue.project_name = %s
             WHERE vf.project_name = %s AND ue.id IS NULL
             """,
-            (project_name, project_name)
+            (project_name, project_name),
         )
         missing_rows = _cur.fetchall()
         _cur.close()
@@ -254,7 +291,9 @@ def main():
                     if found:
                         missing_abs.append(str(found[0]))
                     else:
-                        logger.warning("Task 4: could not resolve path for DB entry '%s'", rel_path)
+                        logger.warning(
+                            "Task 4: could not resolve path for DB entry '%s'", rel_path
+                        )
             # Add without duplicating already-dirty files
             existing_set = {str(Path(f).resolve()) for f in task4_files}
             for p in missing_abs:
@@ -263,7 +302,8 @@ def main():
             if missing_abs:
                 logger.info(
                     "Task 4: found %d files in vue_files with no ui_extractions for project '%s' — adding to Task 4 run",
-                    len(missing_abs), project_name
+                    len(missing_abs),
+                    project_name,
                 )
     except Exception as e:
         logger.warning("Could not query for missing ui_extractions: %s", e)
@@ -278,13 +318,19 @@ def main():
             print("=" * 65)
             print("  TASK 4: VUE UI EXTRACTION SCANNER")
             print("=" * 65)
-            logger.info("Running Task 4 UI extraction on %d files (%d dirty, %d missing extractions)...",
-                        len(task4_files), len(dirty_files), len(task4_files) - len(dirty_files))
+            logger.info(
+                "Running Task 4 UI extraction on %d files (%d dirty, %d missing extractions)...",
+                len(task4_files),
+                len(dirty_files),
+                len(task4_files) - len(dirty_files),
+            )
             task4_main(dirty_files=task4_files)
         except Exception as e:
             logger.error("Failed to run Task 4 UI Extractor: %s", e)
     else:
-        logger.info("Skipping Task 4 UI Extraction - no dirty files and all ui_extractions up to date")
+        logger.info(
+            "Skipping Task 4 UI Extraction - no dirty files and all ui_extractions up to date"
+        )
 
     # 7. Export Database to JSON
     db_json_path = BASE / "task2_db_export.json"
@@ -316,12 +362,17 @@ def main():
             print("=" * 65)
             print("  TASK 5: UI CONSISTENCY & SPELL CHECKER")
             print("=" * 65)
-            logger.info("Running targeted Task 5 UI consistency check on %d dirty files...", len(dirty_files))
+            logger.info(
+                "Running targeted Task 5 UI consistency check on %d dirty files...",
+                len(dirty_files),
+            )
             task5_main(cfg, dirty_files=dirty_files)
         except Exception as e:
             logger.error("Failed to run Task 5 checker: %s", e)
     else:
-        logger.info("Skipping Task 5 UI Consistency Check - no dirty files (all files unchanged)")
+        logger.info(
+            "Skipping Task 5 UI Consistency Check - no dirty files (all files unchanged)"
+        )
 
     # 10. Task 6 UI Accessibility & Usability Compliance Checker
     # DISABLED: Now handled by eslint_extractor writing to accessibility_defects
@@ -352,23 +403,36 @@ def main():
     logger.info("Starting database cleanup for orphaned files...")
     try:
         from db.db_writer import cleanup_orphaned_files
+
         cleanup_stats = cleanup_orphaned_files(cfg, BASE_PATH)
-        
-        total_removed = (cleanup_stats["vue_files_removed"] + 
-                      cleanup_stats["api_calls_removed"] + 
-                      cleanup_stats["file_flags_removed"] + 
-                      cleanup_stats["accessibility_defects_removed"] +
-                      cleanup_stats["ui_extractions_removed"] + 
-                      cleanup_stats["ui_defects_removed"])
-        
+
+        total_removed = (
+            cleanup_stats["vue_files_removed"]
+            + cleanup_stats["api_calls_removed"]
+            + cleanup_stats["file_flags_removed"]
+            + cleanup_stats["accessibility_defects_removed"]
+            + cleanup_stats["ui_extractions_removed"]
+            + cleanup_stats["ui_defects_removed"]
+        )
+
         if total_removed > 0:
             logger.info("Database cleanup completed:")
             logger.info("  - Vue files removed: %d", cleanup_stats["vue_files_removed"])
             logger.info("  - API calls removed: %d", cleanup_stats["api_calls_removed"])
-            logger.info("  - File flags removed: %d", cleanup_stats["file_flags_removed"])
-            logger.info("  - Accessibility defects removed: %d", cleanup_stats["accessibility_defects_removed"])
-            logger.info("  - UI extractions removed: %d", cleanup_stats["ui_extractions_removed"])
-            logger.info("  - UI defects removed: %d", cleanup_stats["ui_defects_removed"])
+            logger.info(
+                "  - File flags removed: %d", cleanup_stats["file_flags_removed"]
+            )
+            logger.info(
+                "  - Accessibility defects removed: %d",
+                cleanup_stats["accessibility_defects_removed"],
+            )
+            logger.info(
+                "  - UI extractions removed: %d",
+                cleanup_stats["ui_extractions_removed"],
+            )
+            logger.info(
+                "  - UI defects removed: %d", cleanup_stats["ui_defects_removed"]
+            )
             logger.info("  Total rows removed: %d", total_removed)
         else:
             logger.info("Database cleanup: No orphaned files found")
