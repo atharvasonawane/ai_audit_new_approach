@@ -19,6 +19,10 @@ __pycache__/
 .idea/
 
 # Custom Exclusions for Code Audit Librarian
+audit_history.db
+audit_history.db-wal
+audit_history.db-shm
+scan.log
 *.json
 # NOTE: project_config.yaml is tracked intentionally but MUST NOT contain real credentials.
 # All secrets (DB password, etc.) must live in .env — never hardcode them in the yaml.
