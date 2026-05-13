@@ -45,11 +45,29 @@ export const filesAPI = {
   // Get all files
   getFiles: () => api.get('/files'),
   
-  // Get file details by ID
-  getFileById: (fileId) => api.get(`/files/${fileId}`),
+  // Get file metrics
+  getFileMetrics: (filePath) => api.get(`/file-metrics/${filePath}`),
   
-  // Get file issues
-  getFileIssues: (fileId) => api.get(`/files/${fileId}/issues`),
+  // Get file AI issues
+  getFileAIIssues: (filePath) => api.get(`/file-ai-issues/${filePath}`),
+  
+  // Get file ESLint flags
+  getFileESLint: (filePath) => api.get(`/file-eslint/${filePath}`),
+  
+  // Get file accessibility defects
+  getFileAccessibility: (filePath) => api.get(`/file-accessibility/${filePath}`),
+  
+  // Get file API calls
+  getFileAPICalls: (filePath) => api.get(`/file-api-calls/${filePath}`),
+  
+  // Get project summary
+  getSummary: () => api.get('/summary'),
+  
+  // Get executive summary
+  getExecutiveSummary: () => api.get('/executive-summary'),
+  
+  // Get worst offenders
+  getWorstOffenders: (limit = 10) => api.get(`/worst-offenders?limit=${limit}`),
 }
 
 export default api
