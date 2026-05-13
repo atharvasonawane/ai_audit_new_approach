@@ -115,7 +115,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { 
   Search, 
   FileCode2, 
@@ -127,6 +128,8 @@ import {
 } from 'lucide-vue-next'
 import { filesAPI } from '../api.js'
 import FileDetailView from '../components/FileDetailView.vue'
+
+const route = useRoute()
 
 // State
 const files = ref([])
@@ -201,6 +204,27 @@ const getTotalIssues = (file) => {
 // Lifecycle
 onMounted(() => {
   fetchFiles()
+})
+
+// Watch for query parameter changes (from command palette)
+watch(() => route.query.file, (newFilePath) => {
+  if (newFilePath && files.value.length > 0) {
+    // Find the file in the list
+    const file = files.value.find(f => f.file_path === newFilePath)
+    if (file) {
+      selectFile(file)
+    }
+  }
+}, { immediate: true })
+
+// Watch for files loaded to handle initial query parameter
+watch(files, (newFiles) => {
+  if (newFiles.length > 0 && route.query.file) {
+    const file = newFiles.find(f => f.file_path === route.query.file)
+    if (file) {
+      selectFile(file)
+    }
+  }
 })
 </script>
 
