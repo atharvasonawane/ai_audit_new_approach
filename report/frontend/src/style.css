@@ -1,0 +1,193 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Color Palette - Neutrals (Foundation) */
+    --color-bg-primary: #0F0F0F;
+    --color-bg-secondary: #1A1A1A;
+    --color-bg-tertiary: #252525;
+    --color-bg-hover: #323232;
+
+    --color-text-primary: #FFFFFF;
+    --color-text-secondary: #A8A8A8;
+    --color-text-tertiary: #707070;
+
+    --color-border: #2D2D2D;
+    --color-border-subtle: #1F1F1F;
+
+    /* Status & Severity Colors */
+    --color-severity-critical: #FF5E5E;
+    --color-severity-high: #FF8A00;
+    --color-severity-medium: #FFB800;
+    --color-severity-low: #4ADE80;
+    --color-severity-info: #60A5FA;
+
+    --color-status-success: #10B981;
+    --color-status-warning: #F59E0B;
+    --color-status-error: #EF4444;
+    --color-status-pending: #6B7280;
+
+    /* Accent Colors */
+    --color-accent-primary: #3B82F6;
+    --color-accent-secondary: #8B5CF6;
+    --color-accent-hover: #60A5FA;
+
+    /* Category Colors */
+    --color-category-ai: #A78BFA;
+    --color-category-eslint: #34D399;
+    --color-category-a11y: #FBBF24;
+    --color-category-api: #60A5FA;
+
+    /* Typography - Font Stacks */
+    --font-display: "Sohne", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "Menlo", "Monaco", "Courier New", monospace;
+
+    /* Typography - Size Scale */
+    --text-xs: 0.75rem;    /* 12px */
+    --text-sm: 0.875rem;   /* 14px */
+    --text-base: 1rem;     /* 16px */
+    --text-lg: 1.125rem;   /* 18px */
+    --text-xl: 1.25rem;    /* 20px */
+    --text-2xl: 1.75rem;   /* 28px */
+    --text-3xl: 2rem;      /* 32px */
+    --text-4xl: 2.5rem;    /* 40px */
+
+    /* Typography - Line Height */
+    --leading-tight: 1.2;
+    --leading-normal: 1.5;
+    --leading-relaxed: 1.75;
+
+    /* Typography - Letter Spacing */
+    --tracking-tight: -0.02em;
+    --tracking-normal: 0em;
+    --tracking-wide: 0.05em;
+
+    /* Spacing Scale (8px base unit) */
+    --space-0: 0;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-7: 28px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
+
+    /* Shadows & Elevation */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.25);
+    --shadow-base: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+
+    /* Border Radius */
+    --rounded-none: 0;
+    --rounded-sm: 4px;
+    --rounded-base: 6px;
+    --rounded-lg: 8px;
+    --rounded-xl: 12px;
+    --rounded-2xl: 16px;
+    --rounded-full: 9999px;
+  }
+
+  /* Base Styles */
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-body);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    color: var(--color-text-primary);
+    background-color: var(--color-bg-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  /* Typography Base Styles */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
+    color: var(--color-text-primary);
+    margin: 0;
+  }
+
+  h1 {
+    font-size: var(--text-4xl);
+    font-weight: 700;
+  }
+
+  h2 {
+    font-size: var(--text-3xl);
+    font-weight: 600;
+  }
+
+  h3 {
+    font-size: var(--text-xl);
+    font-weight: 600;
+  }
+
+  p {
+    margin: 0;
+    line-height: var(--leading-normal);
+  }
+
+  code, pre {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+  }
+
+  /* Link Styles */
+  a {
+    color: var(--color-accent-primary);
+    text-decoration: none;
+    transition: color 200ms ease-out;
+  }
+
+  a:hover {
+    color: var(--color-accent-hover);
+  }
+
+  /* Button Reset */
+  button {
+    font-family: var(--font-body);
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* Input Reset */
+  input, textarea, select {
+    font-family: var(--font-body);
+    font-size: var(--text-base);
+    color: var(--color-text-primary);
+  }
+
+  /* Scrollbar Styling (Dark Theme) */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--color-bg-primary);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-bg-tertiary);
+    border-radius: var(--rounded-base);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-bg-hover);
+  }
+}
