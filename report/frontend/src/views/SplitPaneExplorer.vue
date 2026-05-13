@@ -94,15 +94,21 @@
       </div>
     </div>
 
-    <!-- Right Pane: Detail View Placeholder -->
-    <div class="flex-1 bg-bg-primary flex items-center justify-center">
-      <div class="text-center">
-        <FileSearch 
-          :size="64" 
-          :stroke-width="1.5" 
-          class="text-text-tertiary mx-auto mb-4"
-        />
-        <p class="text-text-secondary text-lg">Select a file to view details</p>
+    <!-- Right Pane: File Detail View -->
+    <div class="flex-1 bg-bg-primary overflow-hidden">
+      <FileDetailView 
+        v-if="selectedFilePath" 
+        :filePath="selectedFilePath" 
+      />
+      <div v-else class="flex items-center justify-center h-full">
+        <div class="text-center">
+          <FileSearch 
+            :size="64" 
+            :stroke-width="1.5" 
+            class="text-text-tertiary mx-auto mb-4"
+          />
+          <p class="text-text-secondary text-lg">Select a file to view details</p>
+        </div>
       </div>
     </div>
   </div>
@@ -120,6 +126,7 @@ import {
   FileSearch
 } from 'lucide-vue-next'
 import { filesAPI } from '../api.js'
+import FileDetailView from '../components/FileDetailView.vue'
 
 // State
 const files = ref([])
@@ -127,6 +134,7 @@ const loading = ref(false)
 const error = ref(null)
 const searchQuery = ref('')
 const selectedFile = ref(null)
+const selectedFilePath = ref(null)
 
 // Computed
 const filteredFiles = computed(() => {
@@ -167,6 +175,7 @@ const fetchFiles = async () => {
 
 const selectFile = (file) => {
   selectedFile.value = file
+  selectedFilePath.value = file.file_path
   const totalIssues = (file.eslint_flag_count || 0) + (file.accessibility_count || 0) + (file.ai_issue_count || 0)
   console.log('File selected:', file.file_path, 'Total Issues:', totalIssues)
 }
