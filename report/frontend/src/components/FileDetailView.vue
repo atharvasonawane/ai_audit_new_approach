@@ -122,7 +122,11 @@
                 Line {{ issue.line_number || 'N/A' }}
               </span>
             </div>
-            <pre v-if="issue.code_snippet" class="code-snippet">{{ issue.code_snippet }}</pre>
+            <CodeSnippet 
+              v-if="issue.code_snippet" 
+              :code="issue.code_snippet"
+              :targetLine="issue.line_number"
+            />
           </div>
         </div>
 
@@ -153,7 +157,11 @@
                 Line {{ flag.line_number || 'N/A' }}
               </span>
             </div>
-            <pre v-if="flag.code_snippet" class="code-snippet">{{ flag.code_snippet }}</pre>
+            <CodeSnippet 
+              v-if="flag.code_snippet" 
+              :code="flag.code_snippet"
+              :targetLine="flag.line_number"
+            />
           </div>
         </div>
 
@@ -190,7 +198,11 @@
                 Line {{ defect.line_number || 'N/A' }}
               </span>
             </div>
-            <pre v-if="defect.code_snippet" class="code-snippet">{{ defect.code_snippet }}</pre>
+            <CodeSnippet 
+              v-if="defect.code_snippet" 
+              :code="defect.code_snippet"
+              :targetLine="defect.line_number"
+            />
           </div>
         </div>
 
@@ -218,7 +230,11 @@
                 Line {{ call.line_number || 'N/A' }}
               </span>
             </div>
-            <pre v-if="call.code_snippet" class="code-snippet">{{ call.code_snippet }}</pre>
+            <CodeSnippet 
+              v-if="call.code_snippet" 
+              :code="call.code_snippet"
+              :targetLine="call.line_number"
+            />
           </div>
         </div>
       </div>
@@ -237,6 +253,7 @@ import {
   Info
 } from 'lucide-vue-next'
 import { filesAPI } from '../api.js'
+import CodeSnippet from './CodeSnippet.vue'
 
 const props = defineProps({
   filePath: {
@@ -421,19 +438,6 @@ watch(() => props.filePath, (newPath) => {
 .badge-low {
   background-color: var(--color-severity-low);
   color: #FFFFFF;
-}
-
-.code-snippet {
-  background-color: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-base);
-  padding: 12px;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--color-text-primary);
-  overflow-x: auto;
-  line-height: var(--leading-relaxed);
-  white-space: pre-wrap;
 }
 
 .empty-state {
