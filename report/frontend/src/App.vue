@@ -1,20 +1,12 @@
 <template>
-  <div class="h-screen w-screen overflow-hidden text-text-primary bg-bg-primary flex">
-    <!-- Sidebar -->
+  <div class="app-layout">
     <Sidebar />
-
-    <!-- Main Content Column -->
-    <div class="flex-1 flex flex-col">
-      <!-- Navigation Header -->
+    <div class="app-main">
       <Navigation />
-
-      <!-- Main Content Area with Router View -->
-      <main class="flex-1 overflow-auto p-6">
+      <main class="app-content">
         <router-view />
       </main>
     </div>
-
-    <!-- Global Command Palette -->
     <CommandPalette />
   </div>
 </template>
@@ -26,5 +18,26 @@ import CommandPalette from './components/CommandPalette.vue'
 </script>
 
 <style scoped>
-/* Layout handled by Tailwind and CSS variables */
+.app-layout {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  display: flex;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
 </style>

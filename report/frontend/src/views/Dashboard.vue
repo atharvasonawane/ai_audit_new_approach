@@ -1,144 +1,178 @@
 <template>
-  <div class="flex flex-col h-full overflow-auto">
-    <!-- Loading State -->
-    <div v-if="loading" class="flex items-center justify-center h-full">
-      <div class="text-center">
-        <Loader2 
-          :size="48" 
-          :stroke-width="2" 
-          class="animate-spin text-accent-primary mx-auto mb-4"
-        />
-        <p class="text-text-secondary text-base">Loading dashboard...</p>
+  <div class="dashboard">
+    <!-- Loading -->
+    <div v-if="loading" class="full-center">
+      <div class="loader-wrap">
+        <div class="spinner"></div>
+        <p class="loader-text">Loading dashboard...</p>
       </div>
     </div>
 
-    <!-- Error State -->
-    <div v-else-if="error" class="flex items-center justify-center h-full p-6">
-      <div class="bg-bg-secondary border border-severity-error rounded-lg p-8 text-center max-w-md">
-        <AlertCircle 
-          :size="48" 
-          :stroke-width="2" 
-          class="text-severity-error mx-auto mb-4"
-        />
-        <p class="text-text-primary font-semibold mb-2">Failed to load dashboard</p>
-        <p class="text-text-secondary text-sm mb-4">{{ error }}</p>
-        <button
-          @click="fetchDashboardData"
-          class="retry-button"
-        >
-          <RefreshCw :size="16" :stroke-width="2" />
-          <span>Retry</span>
+    <!-- Error -->
+    <div v-else-if="error" class="full-center">
+      <div class="error-card">
+        <div class="error-icon">!</div>
+        <h3>Failed to load</h3>
+        <p>{{ error }}</p>
+        <button class="btn-primary" @click="fetchDashboardData">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M1 4s1-3 7-3a7 7 0 010 14c-3 0-5.5-1.5-6.5-4"/>
+            <path d="M1 1v3h3"/>
+          </svg>
+          Retry
         </button>
       </div>
     </div>
 
     <!-- Dashboard Content -->
-    <div v-else class="px-6 py-6 space-y-8">
-      <!-- Header -->
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-3xl font-bold text-text-primary">
-            {{ summary.project_name || 'Code Audit Dashboard' }}
-          </h1>
-          <p class="text-text-secondary text-sm mt-1">
-            Last scan completed
-          </p>
+    <div v-else class="dashboard-content fade-in">
+      <!-- Top Bar -->
+      <div class="dash-header">
+        <div class="dash-header-left">
+          <div class="project-badge">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M1 4a1 1 0 011-1h4l2 2h6a1 1 0 011 1v7a1 1 0 01-1 1H2a1 1 0 01-1-1V4z"/>
+            </svg>
+            {{ summary.project_name || 'Unknown Project' }}
+          </div>
+          <h1 class="dash-title">Audit Dashboard</h1>
+          <p class="dash-sub">Last scan completed — all findings below</p>
         </div>
-        <button class="re-audit-button">
-          <RefreshCw :size="16" :stroke-width="2" />
-          <span>Re-Audit</span>
+        <button class="btn-primary" @click="fetchDashboardData">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M1 4s1-3 7-3a7 7 0 010 14c-3 0-5.5-1.5-6.5-4"/>
+            <path d="M1 1v3h3"/>
+          </svg>
+          Re-Audit
         </button>
       </div>
 
-      <!-- Executive Synthesis Panel -->
-      <div class="executive-synthesis-panel">
-        <h2 class="panel-title">Executive Synthesis</h2>
-        <p class="synthesis-text">
-          {{ executiveSummary.synthesis_text || 'No executive summary available. Run the full audit pipeline first.' }}
-        </p>
+      <!-- Executive Summary -->
+      <div class="exec-panel" v-if="executiveSummary.synthesis_text">
+        <div class="exec-label">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="8" cy="8" r="6"/><path d="M8 5v4l2 2"/>
+          </svg>
+          Executive Summary
+        </div>
+        <p class="exec-text">{{ executiveSummary.synthesis_text }}</p>
       </div>
 
-      <!-- Metrics Grid -->
+      <!-- Metrics -->
       <div class="metrics-grid">
         <div class="metric-card">
-          <div class="metric-label">TOTAL FILES</div>
+          <div class="metric-label">Total Files</div>
           <div class="metric-value">{{ summary.total_files || 0 }}</div>
+          <div class="metric-bar" style="background:rgba(56,139,253,0.2)">
+            <div class="metric-fill" style="background:#388BFD;width:65%"></div>
+          </div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">TOTAL ISSUES</div>
-          <div class="metric-value">{{ summary.ai_issues_total || 0 }}</div>
+          <div class="metric-label">Total Issues</div>
+          <div class="metric-value accent-red">{{ summary.ai_issues_total || 0 }}</div>
+          <div class="metric-bar" style="background:rgba(248,81,73,0.15)">
+            <div class="metric-fill" style="background:#F85149;width:48%"></div>
+          </div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">ESLINT FLAGS</div>
-          <div class="metric-value">{{ summary.total_eslint_flags || 0 }}</div>
+          <div class="metric-label">ESLint Flags</div>
+          <div class="metric-value accent-green">{{ summary.total_eslint_flags || 0 }}</div>
+          <div class="metric-bar" style="background:rgba(63,185,80,0.15)">
+            <div class="metric-fill" style="background:#3FB950;width:55%"></div>
+          </div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">A11Y DEFECTS</div>
-          <div class="metric-value">{{ summary.total_accessibility_defects || 0 }}</div>
+          <div class="metric-label">A11y Defects</div>
+          <div class="metric-value accent-amber">{{ summary.total_accessibility_defects || 0 }}</div>
+          <div class="metric-bar" style="background:rgba(210,153,34,0.15)">
+            <div class="metric-fill" style="background:#D29922;width:80%"></div>
+          </div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">AVG COMPLEXITY</div>
+          <div class="metric-label">Avg Complexity</div>
           <div class="metric-value">{{ summary.average_complexity || 0 }}</div>
+          <div class="metric-bar" style="background:rgba(137,87,229,0.15)">
+            <div class="metric-fill" style="background:#8957E5;width:30%"></div>
+          </div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">HIGH SEVERITY</div>
-          <div class="metric-value severity-high">{{ summary.ai_issues_by_severity?.High || 0 }}</div>
+          <div class="metric-label">High Severity</div>
+          <div class="metric-value accent-orange">{{ summary.ai_issues_by_severity?.High || 0 }}</div>
+          <div class="metric-bar" style="background:rgba(240,136,62,0.15)">
+            <div class="metric-fill" style="background:#F0883E;width:25%"></div>
+          </div>
         </div>
       </div>
 
-      <!-- Charts Section -->
+      <!-- Charts -->
       <div class="charts-grid">
-        <!-- Severity Pie Chart -->
         <div class="chart-card">
-          <h3 class="chart-title">Issues by Severity</h3>
-          <div class="chart-container">
+          <div class="chart-header">
+            <span class="chart-title">Issues by Severity</span>
+            <div class="chart-legend">
+              <div class="leg-item"><span class="leg-dot" style="background:#F0883E"></span>High</div>
+              <div class="leg-item"><span class="leg-dot" style="background:#D29922"></span>Medium</div>
+              <div class="leg-item"><span class="leg-dot" style="background:#3FB950"></span>Low</div>
+            </div>
+          </div>
+          <div class="chart-wrap">
             <Doughnut :data="severityChartData" :options="severityChartOptions" />
           </div>
         </div>
 
-        <!-- Category Bar Chart -->
         <div class="chart-card">
-          <h3 class="chart-title">Issues by Category</h3>
-          <div class="chart-container">
+          <div class="chart-header">
+            <span class="chart-title">Issues by Category</span>
+          </div>
+          <div class="chart-wrap">
             <Bar :data="categoryChartData" :options="categoryChartOptions" />
           </div>
         </div>
       </div>
 
-      <!-- Worst Offenders Panel -->
-      <div class="worst-offenders-panel">
-        <h2 class="panel-title">Worst Offenders</h2>
-        <div v-if="worstOffenders.length === 0" class="empty-state">
-          <FileSearch :size="48" :stroke-width="1.5" class="text-text-tertiary mx-auto mb-3" />
-          <p class="text-text-secondary">No files analyzed yet</p>
+      <!-- Worst Offenders -->
+      <div class="offenders-card">
+        <div class="offenders-header">
+          <span class="chart-title">Worst Offenders</span>
+          <span class="offenders-sub">Files with the most issues</span>
         </div>
+
+        <div v-if="worstOffenders.length === 0" class="offenders-empty">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.25">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <p>No files analyzed yet</p>
+        </div>
+
         <div v-else class="offenders-list">
           <div
-            v-for="(file, index) in worstOffenders"
-            :key="index"
+            v-for="(file, i) in worstOffenders"
+            :key="i"
             class="offender-row"
             @click="navigateToFile(file.file_path)"
           >
-            <div class="offender-rank">{{ index + 1 }}</div>
+            <div class="offender-rank">#{{ i + 1 }}</div>
             <div class="offender-info">
-              <div class="offender-filename">{{ getFileName(file.file_path) }}</div>
+              <div class="offender-name">{{ getFileName(file.file_path) }}</div>
               <div class="offender-path">{{ file.file_path }}</div>
             </div>
-            <div class="offender-metrics">
-              <div class="metric-badge">
-                <span class="metric-badge-label">Issues</span>
-                <span class="metric-badge-value">{{ file.composite_score || 0 }}</span>
+            <div class="offender-scores">
+              <div class="score-item">
+                <span class="score-label">Issues</span>
+                <span class="score-val">{{ file.composite_score || 0 }}</span>
               </div>
-              <div class="metric-badge">
-                <span class="metric-badge-label">ESLint</span>
-                <span class="metric-badge-value">{{ file.eslint_flag_count || 0 }}</span>
+              <div class="score-item">
+                <span class="score-label">ESLint</span>
+                <span class="score-val">{{ file.eslint_flag_count || 0 }}</span>
               </div>
-              <div class="metric-badge">
-                <span class="metric-badge-label">AI</span>
-                <span class="metric-badge-value">{{ file.ai_issue_count || 0 }}</span>
+              <div class="score-item">
+                <span class="score-label">AI</span>
+                <span class="score-val ai-col">{{ file.ai_issue_count || 0 }}</span>
               </div>
             </div>
-            <ChevronRight :size="20" :stroke-width="2" class="offender-arrow" />
+            <svg class="offender-arrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 12l4-4-4-4"/>
+            </svg>
           </div>
         </div>
       </div>
@@ -149,468 +183,457 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { 
-  Loader2, 
-  AlertCircle, 
-  RefreshCw,
-  FileSearch,
-  ChevronRight
-} from 'lucide-vue-next'
 import { filesAPI } from '../api.js'
 import {
-  Chart as ChartJS,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  LinearScale
+  Chart as ChartJS, Title, Tooltip, Legend,
+  ArcElement, BarElement, CategoryScale, LinearScale
 } from 'chart.js'
 import { Doughnut, Bar } from 'vue-chartjs'
 
-// Register Chart.js components
-ChartJS.register(
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  LinearScale
-)
+ChartJS.register(Title, Tooltip, Legend, ArcElement, BarElement, CategoryScale, LinearScale)
 
 const router = useRouter()
-
-// State
 const loading = ref(false)
 const error = ref(null)
 const summary = ref({})
 const executiveSummary = ref({})
 const worstOffenders = ref([])
 
-// Severity Chart Data
 const severityChartData = computed(() => {
-  const severities = summary.value.ai_issues_by_severity || {}
+  const s = summary.value.ai_issues_by_severity || {}
   return {
     labels: ['High', 'Medium', 'Low'],
-    datasets: [{
-      data: [
-        severities.High || 0,
-        severities.Medium || 0,
-        severities.Low || 0
-      ],
-      backgroundColor: [
-        '#FF8A00', // High - orange
-        '#FFB800', // Medium - amber
-        '#4ADE80'  // Low - green
-      ],
-      borderWidth: 0
-    }]
+    datasets: [{ data: [s.High||0, s.Medium||0, s.Low||0], backgroundColor: ['#F0883E','#D29922','#3FB950'], borderWidth: 0, hoverOffset: 4 }]
   }
 })
 
 const severityChartOptions = {
-  responsive: true,
-  maintainAspectRatio: true,
+  responsive: true, maintainAspectRatio: true,
+  cutout: '65%',
   plugins: {
-    legend: {
-      position: 'bottom',
-      labels: {
-        color: '#A8A8A8',
-        font: {
-          size: 12,
-          family: 'Inter, system-ui, sans-serif'
-        },
-        padding: 16
-      }
-    },
-    tooltip: {
-      backgroundColor: '#1A1A1A',
-      titleColor: '#FFFFFF',
-      bodyColor: '#A8A8A8',
-      borderColor: '#2D2D2D',
-      borderWidth: 1,
-      padding: 12,
-      displayColors: true
-    }
+    legend: { display: false },
+    tooltip: { backgroundColor: '#0D1117', titleColor: '#E6EDF3', bodyColor: '#7D8590', borderColor: '#21262D', borderWidth: 1, padding: 10 }
   }
 }
 
-// Category Chart Data
-const categoryChartData = computed(() => {
-  return {
-    labels: ['AI Issues', 'ESLint', 'Accessibility'],
-    datasets: [{
-      label: 'Issues',
-      data: [
-        summary.value.ai_issues_total || 0,
-        summary.value.total_eslint_flags || 0,
-        summary.value.total_accessibility_defects || 0
-      ],
-      backgroundColor: [
-        '#A78BFA', // AI - purple
-        '#34D399', // ESLint - teal
-        '#FBBF24'  // Accessibility - amber
-      ],
-      borderWidth: 0,
-      borderRadius: 4
-    }]
-  }
-})
+const categoryChartData = computed(() => ({
+  labels: ['AI Issues', 'ESLint', 'Accessibility'],
+  datasets: [{
+    label: 'Count',
+    data: [summary.value.ai_issues_total||0, summary.value.total_eslint_flags||0, summary.value.total_accessibility_defects||0],
+    backgroundColor: ['rgba(188,140,255,0.8)', 'rgba(86,211,100,0.8)', 'rgba(227,179,65,0.8)'],
+    borderWidth: 0, borderRadius: 4
+  }]
+}))
 
 const categoryChartOptions = {
-  responsive: true,
-  maintainAspectRatio: true,
+  responsive: true, maintainAspectRatio: true,
   scales: {
-    y: {
-      beginAtZero: true,
-      ticks: {
-        color: '#A8A8A8',
-        font: {
-          size: 11,
-          family: 'Inter, system-ui, sans-serif'
-        }
-      },
-      grid: {
-        color: '#2D2D2D',
-        drawBorder: false
-      }
-    },
-    x: {
-      ticks: {
-        color: '#A8A8A8',
-        font: {
-          size: 11,
-          family: 'Inter, system-ui, sans-serif'
-        }
-      },
-      grid: {
-        display: false
-      }
-    }
+    y: { beginAtZero: true, ticks: { color: '#7D8590', font: { size: 11 } }, grid: { color: '#21262D' } },
+    x: { ticks: { color: '#7D8590', font: { size: 11 } }, grid: { display: false } }
   },
   plugins: {
-    legend: {
-      display: false
-    },
-    tooltip: {
-      backgroundColor: '#1A1A1A',
-      titleColor: '#FFFFFF',
-      bodyColor: '#A8A8A8',
-      borderColor: '#2D2D2D',
-      borderWidth: 1,
-      padding: 12
-    }
+    legend: { display: false },
+    tooltip: { backgroundColor: '#0D1117', titleColor: '#E6EDF3', bodyColor: '#7D8590', borderColor: '#21262D', borderWidth: 1, padding: 10 }
   }
 }
 
-// Methods
 const fetchDashboardData = async () => {
-  loading.value = true
-  error.value = null
-  
+  loading.value = true; error.value = null
   try {
-    // Fetch all data in parallel
     const [summaryRes, executiveRes, offendersRes] = await Promise.all([
-      filesAPI.getSummary(),
-      filesAPI.getExecutiveSummary(),
-      filesAPI.getWorstOffenders(10)
+      filesAPI.getSummary(), filesAPI.getExecutiveSummary(), filesAPI.getWorstOffenders(10)
     ])
-    
     summary.value = summaryRes.data || {}
     executiveSummary.value = executiveRes.data || {}
     worstOffenders.value = offendersRes.data || []
-    
-    console.log('Dashboard data loaded:', {
-      summary: summary.value,
-      executiveSummary: executiveSummary.value,
-      worstOffenders: worstOffenders.value.length
-    })
   } catch (err) {
-    console.error('Error fetching dashboard data:', err)
-    
-    if (err.code === 'ERR_NETWORK' || err.message.includes('Network Error')) {
-      error.value = 'Cannot connect to API server. Please ensure Flask is running on http://localhost:5000'
-    } else if (err.response?.status === 404) {
-      error.value = 'API endpoint not found. Please check the Flask server configuration.'
-    } else if (err.response?.status >= 500) {
-      error.value = 'Server error. Please check the Flask server logs.'
+    if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
+      error.value = 'Cannot connect to API server. Ensure Flask is running on http://localhost:5000'
     } else {
       error.value = err.message || 'An unexpected error occurred'
     }
-  } finally {
-    loading.value = false
-  }
+  } finally { loading.value = false }
 }
 
-const getFileName = (filePath) => {
-  if (!filePath) return ''
-  const parts = filePath.split('/')
-  return parts[parts.length - 1]
-}
+const getFileName = (p) => p ? p.split('/').pop() : ''
+const navigateToFile = (p) => router.push({ path: '/audit', query: { file: p } })
 
-const navigateToFile = (filePath) => {
-  router.push({ path: '/audit', query: { file: filePath } })
-}
-
-// Lifecycle
-onMounted(() => {
-  fetchDashboardData()
-})
+onMounted(fetchDashboardData)
 </script>
 
 <style scoped>
+.dashboard {
+  height: 100%;
+  overflow-y: auto;
+  background: var(--color-bg-primary);
+}
+
+.full-center {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.loader-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 2px solid var(--color-border-emphasis);
+  border-top-color: var(--color-accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loader-text { font-size: 13px; color: var(--color-text-secondary); }
+
+.error-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid rgba(248,81,73,0.3);
+  border-radius: var(--rounded-lg);
+  padding: 32px;
+  text-align: center;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.error-icon {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: rgba(248,81,73,0.1);
+  border: 1px solid rgba(248,81,73,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-status-error);
+  font-weight: 700;
+  font-size: 20px;
+}
+
+.error-card h3 { font-size: 16px; color: var(--color-text-primary); }
+.error-card p { font-size: 13px; color: var(--color-text-secondary); }
+
+.dashboard-content {
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1200px;
+}
+
 /* Header */
-.re-audit-button {
+.dash-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.dash-header-left { display: flex; flex-direction: column; gap: 4px; }
+
+.project-badge {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background-color: var(--color-accent-primary);
-  color: #FFFFFF;
-  border-radius: var(--rounded-base);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 200ms ease-out;
-}
-
-.re-audit-button:hover {
-  background-color: var(--color-accent-hover);
-}
-
-/* Executive Synthesis Panel */
-.executive-synthesis-panel {
-  background-color: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-left: 4px solid var(--color-accent-secondary);
-  border-radius: var(--rounded-lg);
-  padding: 24px;
-}
-
-.panel-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: 12px;
-}
-
-.synthesis-text {
-  font-size: var(--text-base);
-  line-height: var(--leading-relaxed);
+  gap: 6px;
+  padding: 3px 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-emphasis);
+  border-radius: var(--rounded-full);
+  font-size: 11px;
   color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  width: fit-content;
 }
 
-/* Metrics Grid */
+.dash-title {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  color: var(--color-text-primary);
+}
+
+.dash-sub { font-size: 13px; color: var(--color-text-secondary); }
+
+/* Executive Summary */
+.exec-panel {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent-secondary);
+  border-radius: var(--rounded-lg);
+  padding: 16px 20px;
+}
+
+.exec-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent-secondary);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.exec-text {
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* Metrics */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
 }
+
+@media (max-width: 1100px) { .metrics-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 700px)  { .metrics-grid { grid-template-columns: repeat(2, 1fr); } }
 
 .metric-card {
-  background-color: var(--color-bg-secondary);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--rounded-lg);
-  padding: 20px;
-  transition: all 200ms ease-out;
+  padding: 16px;
+  transition: border-color 150ms;
 }
 
-.metric-card:hover {
-  border-color: var(--color-accent-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
+.metric-card:hover { border-color: var(--color-border-emphasis); }
 
 .metric-label {
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: var(--tracking-wide);
+  color: var(--color-text-tertiary);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   margin-bottom: 8px;
 }
 
 .metric-value {
-  font-size: var(--text-3xl);
+  font-family: var(--font-mono);
+  font-size: 28px;
   font-weight: 700;
   color: var(--color-text-primary);
-  font-family: var(--font-mono);
-  line-height: var(--leading-tight);
+  letter-spacing: -0.03em;
+  margin-bottom: 12px;
+  line-height: 1;
 }
 
-.metric-value.severity-high {
-  color: var(--color-severity-high);
+.metric-value.accent-red    { color: var(--color-status-error); }
+.metric-value.accent-green  { color: var(--color-status-success); }
+.metric-value.accent-amber  { color: var(--color-status-warning); }
+.metric-value.accent-orange { color: var(--color-severity-high); }
+
+.metric-bar {
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
 }
 
-/* Charts Grid */
+.metric-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+/* Charts */
 .charts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 24px;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
 }
 
+@media (max-width: 800px) { .charts-grid { grid-template-columns: 1fr; } }
+
 .chart-card {
-  background-color: var(--color-bg-secondary);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--rounded-lg);
-  padding: 24px;
+  padding: 18px 20px;
+}
+
+.chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
 }
 
 .chart-title {
-  font-size: var(--text-base);
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text-primary);
-  margin-bottom: 20px;
 }
 
-.chart-container {
-  position: relative;
-  height: 280px;
+.chart-legend {
+  display: flex;
+  gap: 12px;
 }
 
-/* Worst Offenders Panel */
-.worst-offenders-panel {
-  background-color: var(--color-bg-secondary);
+.leg-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.leg-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+}
+
+.chart-wrap {
+  max-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Offenders */
+.offenders-card {
+  background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--rounded-lg);
-  padding: 24px;
+  overflow: hidden;
 }
 
-.offenders-list {
+.offenders-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.offenders-sub {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.offenders-empty {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
+  padding: 48px;
+  color: var(--color-text-tertiary);
+  font-size: 13px;
 }
 
 .offender-row {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px;
-  background-color: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-base);
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--color-border-subtle);
   cursor: pointer;
-  transition: all 200ms ease-out;
+  transition: background 150ms;
 }
 
-.offender-row:hover {
-  border-color: var(--color-accent-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
+.offender-row:last-child { border-bottom: none; }
+.offender-row:hover { background: var(--color-bg-tertiary); }
+.offender-row:hover .offender-arrow { color: var(--color-accent-primary); }
 
 .offender-rank {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  background-color: var(--color-bg-tertiary);
-  border-radius: var(--rounded-full);
-  font-size: var(--text-sm);
-  font-weight: 700;
-  color: var(--color-text-primary);
   font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  width: 28px;
   flex-shrink: 0;
 }
 
-.offender-info {
-  flex: 1;
-  min-width: 0;
+.offender-info { flex: 1; min-width: 0; }
+
+.offender-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent-hover);
+  font-family: var(--font-mono);
+  margin-bottom: 2px;
 }
 
-.offender-filename {
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  font-family: var(--font-mono);
-  margin-bottom: 4px;
-}
+.offender-row:hover .offender-name { text-decoration: underline; }
 
 .offender-path {
-  font-size: var(--text-xs);
+  font-size: 11px;
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.offender-metrics {
+.offender-scores {
   display: flex;
-  gap: 12px;
+  gap: 20px;
   flex-shrink: 0;
 }
 
-.metric-badge {
+.score-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  background-color: var(--color-bg-tertiary);
-  border-radius: var(--rounded-base);
+  gap: 2px;
 }
 
-.metric-badge-label {
-  font-size: var(--text-xs);
+.score-label {
+  font-size: 10px;
   color: var(--color-text-tertiary);
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
 }
 
-.metric-badge-value {
-  font-size: var(--text-lg);
+.score-val {
+  font-family: var(--font-mono);
+  font-size: 15px;
   font-weight: 700;
   color: var(--color-text-primary);
-  font-family: var(--font-mono);
 }
+
+.score-val.ai-col { color: var(--color-category-ai); }
 
 .offender-arrow {
   color: var(--color-text-tertiary);
   flex-shrink: 0;
+  transition: color 150ms;
 }
 
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px 24px;
-  text-align: center;
-}
-
-.retry-button {
+/* Buttons */
+.btn-primary {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background-color: var(--color-accent-primary);
-  color: #FFFFFF;
+  gap: 7px;
+  padding: 9px 16px;
+  background: var(--color-accent-primary);
+  color: white;
   border-radius: var(--rounded-base);
-  font-size: var(--text-sm);
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 200ms ease-out;
+  border: none;
+  transition: all 150ms;
+}
+.btn-primary:hover {
+  background: var(--color-accent-hover);
+  box-shadow: 0 0 20px rgba(56,139,253,0.25);
 }
 
-.retry-button:hover {
-  background-color: var(--color-accent-hover);
-}
-
-/* Loading animation */
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.animate-spin {
-  animation: spin 1s linear infinite;
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 </style>

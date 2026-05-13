@@ -1,15 +1,12 @@
 <template>
-  <div class="flex h-full">
-    <!-- Left Pane: File Explorer -->
-    <div class="w-80 bg-bg-primary border-r border-border flex flex-col overflow-hidden">
-      <!-- Sticky Header with Search -->
-      <div class="sticky top-0 z-10 bg-bg-primary border-b border-border p-4">
-        <div class="relative">
-          <Search 
-            :size="16" 
-            :stroke-width="2" 
-            class="absolute left-3 top-1/2 transform -translate-y-1/2 text-text-tertiary"
-          />
+  <div class="explorer">
+    <!-- Left: File List -->
+    <div class="file-pane">
+      <div class="file-pane-header">
+        <div class="search-wrap">
+          <svg class="search-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5L14 14"/>
+          </svg>
           <input
             v-model="searchQuery"
             type="text"
@@ -17,98 +14,74 @@
             class="search-input"
           />
         </div>
+        <div class="file-count-badge">
+          {{ filteredFiles.length }}
+        </div>
       </div>
 
-      <!-- File List -->
-      <div class="flex-1 overflow-y-auto">
-        <!-- Loading State -->
-        <div v-if="loading" class="flex items-center justify-center h-64">
-          <div class="text-center">
-            <Loader2 
-              :size="32" 
-              :stroke-width="2" 
-              class="animate-spin text-accent-primary mx-auto mb-3"
-            />
-            <p class="text-text-secondary text-sm">Loading files...</p>
-          </div>
+      <div class="file-list">
+        <!-- Loading -->
+        <div v-if="loading" class="file-list-loading">
+          <div v-for="i in 8" :key="i" class="skeleton" :style="`height:40px;margin-bottom:4px;opacity:${1-i*0.1}`"></div>
         </div>
 
-        <!-- Error State -->
-        <div v-else-if="error" class="p-6">
-          <div class="bg-bg-secondary border border-severity-error rounded-lg p-6 text-center">
-            <AlertCircle 
-              :size="32" 
-              :stroke-width="2" 
-              class="text-severity-error mx-auto mb-3"
-            />
-            <p class="text-text-primary font-semibold mb-2">Failed to load files</p>
-            <p class="text-text-secondary text-sm mb-4">{{ error }}</p>
-            <button
-              @click="fetchFiles"
-              class="retry-button"
-            >
-              <RefreshCw :size="16" :stroke-width="2" />
-              <span>Retry</span>
-            </button>
-          </div>
+        <!-- Error -->
+        <div v-else-if="error" class="file-list-error">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+            <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+          </svg>
+          <p>{{ error }}</p>
+          <button class="retry-btn" @click="fetchFiles">Retry</button>
         </div>
 
-        <!-- File List -->
-        <div v-else-if="files.length > 0" class="py-2">
+        <!-- Files -->
+        <div v-else-if="filteredFiles.length > 0">
           <div
-            v-for="(file, index) in filteredFiles"
-            :key="index"
-            @click="selectFile(file)"
+            v-for="(file, i) in filteredFiles"
+            :key="i"
             class="file-row"
             :class="{ active: selectedFile?.file_path === file.file_path }"
+            @click="selectFile(file)"
           >
-            <div class="flex items-center justify-between flex-1 min-w-0">
-              <!-- File Icon & Name -->
-              <div class="flex items-center gap-2 flex-1 min-w-0">
-                <FileCode2 :size="16" :stroke-width="2" class="flex-shrink-0" />
-                <span class="font-mono text-sm truncate">{{ file.file_path }}</span>
-              </div>
-
-              <!-- Issue Count Badge -->
-              <div
-                class="issue-badge"
-                :class="getBadgeClass(file)"
-              >
-                {{ getTotalIssues(file) }}
-              </div>
+            <div class="file-row-left">
+              <svg class="file-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M4 2h5l4 4v8a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z"/>
+                <path d="M9 2v4h4"/>
+                <path d="M6 9h4M6 12h2"/>
+              </svg>
+              <span class="file-name">{{ getFileName(file.file_path) }}</span>
+            </div>
+            <div
+              class="issue-badge"
+              :class="getIssueBadgeClass(file)"
+            >
+              {{ getTotalIssues(file) }}
             </div>
           </div>
         </div>
 
-        <!-- Empty State -->
-        <div v-else class="flex items-center justify-center h-64">
-          <div class="text-center">
-            <FolderOpen 
-              :size="48" 
-              :stroke-width="1.5" 
-              class="text-text-tertiary mx-auto mb-3"
-            />
-            <p class="text-text-secondary text-sm">No files found</p>
-          </div>
+        <!-- Empty -->
+        <div v-else class="file-list-empty">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.2">
+            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+          </svg>
+          <p>No files found</p>
         </div>
       </div>
     </div>
 
-    <!-- Right Pane: File Detail View -->
-    <div class="flex-1 bg-bg-primary overflow-hidden">
-      <FileDetailView 
-        v-if="selectedFilePath" 
-        :filePath="selectedFilePath" 
-      />
-      <div v-else class="flex items-center justify-center h-full">
-        <div class="text-center">
-          <FileSearch 
-            :size="64" 
-            :stroke-width="1.5" 
-            class="text-text-tertiary mx-auto mb-4"
-          />
-          <p class="text-text-secondary text-lg">Select a file to view details</p>
+    <!-- Right: Detail -->
+    <div class="detail-pane">
+      <FileDetailView v-if="selectedFilePath" :filePath="selectedFilePath" />
+      <div v-else class="detail-empty">
+        <div class="detail-empty-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+            <path d="M11 7v4M11 15h.01"/>
+          </svg>
         </div>
+        <h3>Select a file</h3>
+        <p>Choose a file from the left panel to view its audit details, issues, and code snippets.</p>
       </div>
     </div>
   </div>
@@ -117,21 +90,10 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { 
-  Search, 
-  FileCode2, 
-  Loader2, 
-  AlertCircle, 
-  RefreshCw,
-  FolderOpen,
-  FileSearch
-} from 'lucide-vue-next'
 import { filesAPI } from '../api.js'
 import FileDetailView from '../components/FileDetailView.vue'
 
 const route = useRoute()
-
-// State
 const files = ref([])
 const loading = ref(false)
 const error = ref(null)
@@ -139,218 +101,250 @@ const searchQuery = ref('')
 const selectedFile = ref(null)
 const selectedFilePath = ref(null)
 
-// Computed
 const filteredFiles = computed(() => {
   if (!searchQuery.value) return files.value
-  
-  const query = searchQuery.value.toLowerCase()
-  return files.value.filter(file => 
-    file.file_path.toLowerCase().includes(query)
-  )
+  const q = searchQuery.value.toLowerCase()
+  return files.value.filter(f => f.file_path.toLowerCase().includes(q))
 })
 
-// Methods
+const getFileName = (p) => p ? p.split('/').pop() : p
+const getTotalIssues = (f) => (f.eslint_flag_count||0) + (f.accessibility_count||0) + (f.ai_issue_count||0)
+const getIssueBadgeClass = (f) => {
+  const n = getTotalIssues(f)
+  if (n === 0) return 'badge-zero'
+  if (n <= 5)  return 'badge-low'
+  if (n <= 15) return 'badge-med'
+  return 'badge-high'
+}
+
 const fetchFiles = async () => {
-  loading.value = true
-  error.value = null
-  
+  loading.value = true; error.value = null
   try {
-    const response = await filesAPI.getFiles()
-    files.value = response.data || []
-    console.log('Files loaded:', files.value.length)
+    const res = await filesAPI.getFiles()
+    files.value = res.data || []
   } catch (err) {
-    console.error('Error fetching files:', err)
-    
-    // Handle different error types
-    if (err.code === 'ERR_NETWORK' || err.message.includes('Network Error')) {
-      error.value = 'Cannot connect to API server. Please ensure Flask is running on http://localhost:5000'
-    } else if (err.response?.status === 404) {
-      error.value = 'API endpoint not found. Please check the Flask server configuration.'
-    } else if (err.response?.status >= 500) {
-      error.value = 'Server error. Please check the Flask server logs.'
-    } else {
-      error.value = err.message || 'An unexpected error occurred'
-    }
-  } finally {
-    loading.value = false
-  }
+    error.value = err.code === 'ERR_NETWORK' ? 'Cannot connect to API server' : err.message || 'Error'
+  } finally { loading.value = false }
 }
 
 const selectFile = (file) => {
   selectedFile.value = file
   selectedFilePath.value = file.file_path
-  const totalIssues = (file.eslint_flag_count || 0) + (file.accessibility_count || 0) + (file.ai_issue_count || 0)
-  console.log('File selected:', file.file_path, 'Total Issues:', totalIssues)
 }
 
-const getBadgeClass = (file) => {
-  const totalIssues = (file.eslint_flag_count || 0) + (file.accessibility_count || 0) + (file.ai_issue_count || 0)
-  
-  if (totalIssues === 0) {
-    return 'badge-success'
-  } else if (totalIssues <= 5) {
-    return 'badge-low'
-  } else if (totalIssues <= 15) {
-    return 'badge-medium'
-  } else {
-    return 'badge-high'
-  }
-}
+onMounted(fetchFiles)
 
-const getTotalIssues = (file) => {
-  return (file.eslint_flag_count || 0) + (file.accessibility_count || 0) + (file.ai_issue_count || 0)
-}
-
-// Lifecycle
-onMounted(() => {
-  fetchFiles()
-})
-
-// Watch for query parameter changes (from command palette)
-watch(() => route.query.file, (newFilePath) => {
-  if (newFilePath && files.value.length > 0) {
-    // Find the file in the list
-    const file = files.value.find(f => f.file_path === newFilePath)
-    if (file) {
-      selectFile(file)
-    }
+watch(() => route.query.file, (p) => {
+  if (p && files.value.length > 0) {
+    const f = files.value.find(x => x.file_path === p)
+    if (f) selectFile(f)
   }
 }, { immediate: true })
 
-// Watch for files loaded to handle initial query parameter
-watch(files, (newFiles) => {
-  if (newFiles.length > 0 && route.query.file) {
-    const file = newFiles.find(f => f.file_path === route.query.file)
-    if (file) {
-      selectFile(file)
-    }
+watch(files, (arr) => {
+  if (arr.length > 0 && route.query.file) {
+    const f = arr.find(x => x.file_path === route.query.file)
+    if (f) selectFile(f)
   }
 })
 </script>
 
 <style scoped>
+.explorer {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* File Pane */
+.file-pane {
+  width: 260px;
+  min-width: 260px;
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.file-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.search-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+}
+
 .search-input {
   width: 100%;
-  padding: 8px 12px 8px 36px;
-  background-color: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  padding: 7px 10px 7px 28px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-emphasis);
   border-radius: var(--rounded-base);
   color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  transition: all 200ms ease-out;
+  font-size: 12px;
+  outline: none;
+  transition: all 150ms;
 }
 
 .search-input:focus {
-  outline: none;
   border-color: var(--color-accent-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  box-shadow: 0 0 0 2px rgba(56,139,253,0.15);
 }
 
-.search-input::placeholder {
+.search-input::placeholder { color: var(--color-text-tertiary); }
+
+.file-count-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-emphasis);
+  border-radius: var(--rounded-full);
   color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.file-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.file-list-loading { padding: 8px; }
+
+.file-list-error, .file-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.retry-btn {
+  padding: 5px 12px;
+  background: var(--color-accent-primary);
+  color: white;
+  border-radius: var(--rounded-base);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms;
 }
 
 .file-row {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
+  justify-content: space-between;
+  padding: 7px 8px;
+  border-radius: var(--rounded-base);
   cursor: pointer;
-  transition: all 200ms ease-out;
-  color: var(--color-text-secondary);
-  border-left: 3px solid transparent;
+  transition: background 120ms;
+  gap: 6px;
+  border-left: 2px solid transparent;
 }
 
-.file-row:hover {
-  background-color: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-}
+.file-row:hover { background: var(--color-bg-hover); }
 
 .file-row.active {
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
+  background: rgba(56,139,253,0.08);
   border-left-color: var(--color-accent-primary);
 }
 
-.issue-badge {
-  display: inline-flex;
+.file-row-left {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  min-width: 32px;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: var(--rounded-full);
-  font-size: var(--text-xs);
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+
+.file-icon { color: var(--color-text-tertiary); flex-shrink: 0; }
+.file-row.active .file-icon { color: var(--color-accent-hover); }
+
+.file-name {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-row.active .file-name { color: var(--color-text-primary); }
+
+.issue-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--rounded-full);
   flex-shrink: 0;
 }
 
-.badge-success {
-  background-color: var(--color-status-success);
-  color: #FFFFFF;
-}
+.badge-zero { background: rgba(63,185,80,0.1);  color: var(--color-status-success); }
+.badge-low  { background: rgba(63,185,80,0.1);  color: var(--color-status-success); }
+.badge-med  { background: rgba(210,153,34,0.12); color: var(--color-status-warning); }
+.badge-high { background: rgba(248,81,73,0.1);  color: var(--color-status-error); }
 
-.badge-low {
-  background-color: var(--color-severity-low);
-  color: #FFFFFF;
-}
-
-.badge-medium {
-  background-color: var(--color-severity-medium);
-  color: #FFFFFF;
-}
-
-.badge-high {
-  background-color: var(--color-severity-high);
-  color: #FFFFFF;
-}
-
-.retry-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background-color: var(--color-accent-primary);
-  color: #FFFFFF;
-  border-radius: var(--rounded-base);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 200ms ease-out;
-}
-
-.retry-button:hover {
-  background-color: var(--color-accent-hover);
-}
-
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
+/* Detail Pane */
+.detail-pane {
+  flex: 1;
+  overflow: hidden;
   background: var(--color-bg-primary);
 }
 
-::-webkit-scrollbar-thumb {
+.detail-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px;
+  text-align: center;
+}
+
+.detail-empty-icon {
+  width: 64px; height: 64px;
+  border-radius: 50%;
   background: var(--color-bg-tertiary);
-  border-radius: var(--rounded-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  margin-bottom: 4px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-bg-hover);
+.detail-empty h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
-/* Loading animation */
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.animate-spin {
-  animation: spin 1s linear infinite;
+.detail-empty p {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  max-width: 300px;
+  line-height: 1.6;
 }
 </style>
