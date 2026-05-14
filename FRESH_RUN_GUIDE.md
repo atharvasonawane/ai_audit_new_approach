@@ -1,456 +1,295 @@
-# Complete Fresh Run Guide - Code Audit Librarian
+# Code Audit Librarian — Fresh Run Guide
 
-## Overview
-This guide will walk you through running the entire Code Audit Librarian pipeline from scratch:
-1. Delete existing database
-2. Run Phase 1 (Scout - AST/ESLint extraction)
-3. Run Phase 2-3 (LLM Agent analysis)
-4. Start Flask API server
-5. Start Vue.js frontend
-6. View results in browser
+All commands run from the project root:
+`C:\Users\Atharvaso\Desktop\final_approach_main`
 
 ---
 
-## Prerequisites Check
+## Prerequisites
 
-Before starting, verify you have:
-- ✅ Python 3.10+ installed
-- ✅ Node.js 18+ installed
-- ✅ Ollama running with Gemma 3 model (or OpenWebUI configured)
-- ✅ `.env` file configured with LLM credentials
+Before starting, make sure you have:
+- Python 3.11+ installed
+- Node.js 18+ installed
+- The target Vue.js project folder accessible (configured in `audit_tool/config/project_config.yaml`)
+- The LLM endpoint reachable (configured in `.env`)
 
 ---
 
-## Step 1: Stop All Running Servers
+## Step 1 — Stop any running servers
 
-If you have any servers running, stop them first:
+If Flask or Vite are already running, kill them first (Ctrl+C in their terminals, or close the terminals).
+
+---
+
+## Step 2 — Delete the existing database
 
 ```bash
-# Press Ctrl+C in any terminal running:
-# - Flask API server
-# - Vue.js dev server
-# - Any other processes
-```
-
----
-
-## Step 2: Delete Existing Database
-
-```bash
-# Delete the SQLite database
-rm audit_history.db
-
-# Or on Windows:
 del audit_history.db
+del audit_history.db-shm
+del audit_history.db-wal
 ```
 
-**What this does:** Removes all previous scan data so we start fresh.
+These three files together make up the SQLite database. Deleting them gives you a completely clean slate.
+
+**Verify:** Run `dir *.db` — you should see no files listed.
 
 ---
 
-## Step 3: Verify Configuration
-
-Check your `.env` file has the correct settings:
+## Step 3 — Run Phase 1: Scout (Deterministic Analysis)
 
 ```bash
-# View your .env file
-cat .env
-
-# Or on Windows:
-type .env
+audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py
 ```
 
-**Required variables:**
-```env
-OPENWEBUI_BASE_URL=http://your-llm-endpoint/api/v1
-OPENWEBUI_API_KEY=your-api-key
-LLM_MODEL=gemma3:latest
-LLM_TIMEOUT_SECONDS=90
-OPENWEBUI_DISABLE_TOOLS=0
+This scans every `.vue` and `.js` file in the target directory using AST parsing and ESLint.
+
+**What to watch for in the output:**
 ```
-
-**Optional (for testing with limited files):**
-```env
-AI_FILE_LIMIT=10
-```
-
----
-
-## Step 4: Run Phase 1 (Scout - Deterministic Analysis)
-
-This phase scans all Vue files and extracts metrics using AST parsing and ESLint.
-
-```bash
-# Run the scout phase
-python audit_tool/run_audit.py
-```
-
-**What happens:**
-- Scans all `.vue` and `.js` files in the target directory
-- Extracts metrics (methods, computed, watchers, API calls, etc.)
-- Runs ESLint to find Vue best-practice violations
-- Runs ESLint accessibility plugin to find a11y issues
-- Stores everything in SQLite database
-- Creates `audit_history.db` file
-
-**Expected output:**
-```
-[Scout] Starting Phase 1: Deterministic Analysis
-[Scout] Found 75 Vue files
-[Scout] Processing files...
-[Scout] Running ESLint...
-[Scout] Phase 1 complete: 75 files scanned
-```
-
-**Time:** ~30 seconds to 2 minutes (depending on codebase size)
-
----
-
-## Step 5: Verify Database Was Created
-
-```bash
-# Check if database exists
-ls -la audit_history.db
-
-# Or on Windows:
-dir audit_history.db
-```
-
-**Expected:** File should exist and be several MB in size.
-
----
-
-## Step 6: Run Phase 2-3 (LLM Agent Analysis)
-
-This phase uses the LLM to analyze each file and generate insights.
-
-```bash
-# Run the LLM agent
-python mcp_agent/agent.py
-```
-
-**What happens:**
-- Starts MCP server to expose database as tools
-- Connects to LLM (Gemma 3 via Ollama or OpenWebUI)
-- Analyzes each file (complex files individually, simple files in batches)
-- Generates AI issues and stores in database
-- Creates executive synthesis summary
-- Marks audit run as completed
-
-**Expected output:**
-```
-[AI Agent] Started audit run id=1
-[AI Agent] Queue: 15 complex (script_lines>=150), 60 simple.
-[Complex 1/15] Processing Sidebar.vue...
-✓ Wrote 4 issues to database
-[Complex 2/15] Processing ImportStudentABCID.vue...
-✓ Wrote 9 issues to database
+[orchestrator] [1/75] Processing SomeFile.vue
+[orchestrator] [2/75] Processing AnotherFile.vue
 ...
-[Batch 1/8] Processing 8 simple files...
-✓ Wrote 0 issues to database
+INCREMENTAL SCAN SUMMARY
+  Total files found   : 75
+  Files processed     : 75
+  Files skipped       : 0
+  Errors              : 0
+  DB : sqlite (75 new/updated rows)
+```
+
+**Verify it worked:**
+```bash
+audit_tool\venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('audit_history.db'); print('Files:', c.execute('SELECT COUNT(*) FROM vue_files').fetchone()[0]); print('ESLint flags:', c.execute('SELECT COUNT(*) FROM file_flags').fetchone()[0]); print('A11y defects:', c.execute('SELECT COUNT(*) FROM accessibility_defects').fetchone()[0])"
+```
+
+Expected output:
+```
+Files: 75
+ESLint flags: 58
+A11y defects: 271
+```
+
+Phase 1 is fast — typically under 2 seconds.
+
+---
+
+## Step 4 — Run Phase 2: LLM Agent Analysis
+
+```bash
+audit_tool\venv\Scripts\python.exe mcp_agent\agent.py
+```
+
+This sends every file to the LLM (Gemma 3) for intelligent analysis. It processes complex files individually and batches simple ones.
+
+**What to watch for in the output:**
+```
+LLM AGENT: Full codebase analysis + executive synthesis (Stages 4-5)
+[AI Agent] Started audit run id=1.
+[AI Agent] Queue: 40 complex (script_lines>=150), 35 simple.
+[Complex 1/40] Processing cancelAdmission__1.vue...
+✓ Wrote 2 issues to database
+[Complex 2/40] Processing updateABCID__1.vue...
+✓ Wrote 2 issues to database
 ...
-[Executive synthesis] Saved to audit_runs id=1 (2000 chars); status=completed.
+[Batch 1/5] Processing 7 simple files...
+...
+[Executive synthesis] Saved to audit_runs id=1 (4675 chars); status=completed.
 [AI Agent] Audit run 1 completed successfully (including executive synthesis).
 ```
 
-**Time:** 
-- With local Ollama: 5-15 minutes (depending on codebase size)
-- With online LLM: 2-5 minutes (faster but may have rate limits)
+**This takes time** — roughly 3–5 minutes for 75 files depending on LLM speed.
 
-**Note:** If you set `AI_FILE_LIMIT=10` in `.env`, it will only analyze 10 files for testing.
-
----
-
-## Step 7: Verify LLM Analysis Completed
-
+**Verify it worked:**
 ```bash
-# Check if ai_issues table has data
-python -c "import sqlite3; conn = sqlite3.connect('audit_history.db'); print(f'AI Issues: {conn.execute(\"SELECT COUNT(*) FROM ai_issues\").fetchone()[0]}'); print(f'Audit Runs: {conn.execute(\"SELECT status FROM audit_runs ORDER BY id DESC LIMIT 1\").fetchone()[0]}')"
+audit_tool\venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('audit_history.db'); print('AI issues:', c.execute('SELECT COUNT(*) FROM ai_issues').fetchone()[0]); r=c.execute('SELECT status, synthesis_text FROM audit_runs ORDER BY id DESC LIMIT 1').fetchone(); print('Run status:', r[0]); print('Synthesis length:', len(r[1] or ''), 'chars')"
 ```
 
-**Expected output:**
+Expected output:
 ```
-AI Issues: 17
-Audit Runs: completed
+AI issues: 107
+Run status: completed
+Synthesis length: 4675 chars
 ```
 
 ---
 
-## Step 8: Start Flask API Server
+## Step 5 — Start the Flask API Server
 
-Open a **new terminal** (Terminal 1):
+Open a new terminal and run:
 
 ```bash
-# Start Flask API server
-python report/api_server.py
+audit_tool\venv\Scripts\python.exe report\api_server.py
 ```
 
-**Expected output:**
+**What to watch for:**
 ```
 ============================================================
 Code Audit Librarian — Flask API Server (Stage 6)
 ============================================================
 Project: new_university
 Database: audit_history.db
-Base Path: C:/Users/.../StudentManagement/client/app/src
-============================================================
 Starting server on http://localhost:5000
-API endpoints available at http://localhost:5000/api/*
 ============================================================
- * Running on http://127.0.0.1:5000
+* Running on http://127.0.0.1:5000
+* Debugger is active!
 ```
 
-**Keep this terminal open!** The server must stay running.
-
----
-
-## Step 9: Test Flask API
-
-Open a **new terminal** (Terminal 2) to test the API:
-
+**Verify it's working — open a second terminal and run:**
 ```bash
-# Test health endpoint
 curl http://localhost:5000/api/health
+```
 
-# Test files endpoint
-curl http://localhost:5000/api/files
+Expected response:
+```json
+{
+  "database": "audit_history.db",
+  "database_exists": true,
+  "project_name": "new_university",
+  "status": "ok"
+}
+```
 
-# Test summary endpoint
+Then verify data is being served:
+```bash
 curl http://localhost:5000/api/summary
 ```
 
-**Expected:** All should return JSON with 200 OK status.
+Expected response:
+```json
+{
+  "ai_issues_total": 107,
+  "total_files": 75,
+  "total_eslint_flags": 58,
+  "total_accessibility_defects": 271,
+  "project_name": "new_university",
+  "ai_issues_by_severity": {
+    "High": 14,
+    "Medium": 44,
+    "Low": 49
+  }
+}
+```
+
+Keep this terminal open — the API must stay running.
 
 ---
 
-## Step 10: Start Vue.js Frontend
+## Step 6 — Start the Vue Frontend
 
-In **Terminal 2** (or a new Terminal 3):
+Open another new terminal and run:
 
 ```bash
-# Navigate to frontend directory
-cd report/frontend
-
-# Start Vue dev server
+cd report\frontend
 npm run dev
 ```
 
-**Expected output:**
+**What to watch for:**
 ```
-  VITE v8.0.12  ready in 611 ms
-
-  ➜  Local:   http://localhost:3000/
-  ➜  Network: use --host to expose
-  ➜  press h + enter to show help
+  VITE v8.0.12  ready in 526 ms
+  ➜  Local:   http://localhost:5173/
 ```
 
-**Keep this terminal open!** The dev server must stay running.
+Keep this terminal open too.
 
 ---
 
-## Step 11: Open Browser
+## Step 7 — Open the Browser
 
-Open your web browser and navigate to:
+Navigate to:
 
-```
-http://localhost:3000
-```
+- **Dashboard:** http://localhost:5173/dashboard
+- **Audit Explorer:** http://localhost:5173/audit
+- **Home:** http://localhost:5173
 
-**What you should see:**
+**What you should see on the Dashboard:**
+- Executive Synthesis panel with AI-generated summary
+- 6 metric cards (Total Files, Total Issues, ESLint Flags, A11y Defects, Avg Complexity, High Severity)
+- Severity pie chart (High / Medium / Low breakdown)
+- Category bar chart (AI Issues / ESLint / Accessibility)
+- Worst Offenders list (top 10 files by composite score)
 
-### Sidebar (Left):
-- "Code Audit Librarian" title in blue
-- Project name "new_university"
-- Search box
-- List of all scanned files with badges:
-  - Red badges: High severity issues
-  - Yellow badges: Medium severity issues
-  - Gray badges: ESLint flags
-  - Purple badges: Accessibility issues
-- Footer with file counts
-
-### Main Area (Right):
-- Welcome screen with 📊 icon
-- "Welcome to Code Audit Librarian" heading
-- Stats showing total files and total issues
-
-### Try These Actions:
-1. **Search**: Type in the search box to filter files
-2. **Select File**: Click any file in the sidebar
-3. **View Details**: See the file detail placeholder
-4. **Close**: Click the ✕ button to return to welcome screen
+**What you should see in the Audit Explorer:**
+- Left pane: full file list with issue badges
+- Click any file → right pane loads with tabs (AI Issues, ESLint, Accessibility, API Calls)
+- Each tab shows issues with code snippets and line numbers
 
 ---
 
-## Step 12: Verify Everything Works
+## Quick Verification Checklist
 
-### Check Flask API Logs (Terminal 1):
-You should see API requests:
-```
-127.0.0.1 - - [13/May/2026 02:00:00] "GET /api/files HTTP/1.1" 200 -
-127.0.0.1 - - [13/May/2026 02:00:00] "GET /api/summary HTTP/1.1" 200 -
+After completing all steps, confirm:
+
+| Check | Command / URL | Expected |
+|---|---|---|
+| DB has files | sqlite3 check (Step 3) | 75 rows |
+| DB has AI issues | sqlite3 check (Step 4) | 100+ rows |
+| API health | `curl localhost:5000/api/health` | `"status": "ok"` |
+| API has data | `curl localhost:5000/api/summary` | `total_files: 75` |
+| Frontend loads | http://localhost:5173 | No blank screen |
+| Dashboard shows data | http://localhost:5173/dashboard | Charts + metrics visible |
+
+---
+
+## Summary of All Commands (in order)
+
+### Option A: The Unified Orchestrator (New)
+```bash
+# 1. Delete old database
+del audit_history.db audit_history.db-shm audit_history.db-wal
+
+# 2. Run the full pipeline (Scout -> AI Agent -> Start Servers automatically)
+audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py
+
+# You can also run stages independently using the unified CLI:
+# audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --scout-only
+# audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --ai-only
+# audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --report-only
 ```
 
-### Check Vue Dev Server Logs (Terminal 2/3):
-Should show no errors, just:
-```
-  ➜  Local:   http://localhost:3000/
-```
+### Option B: Individual Scripts (Legacy)
+```bash
+# 1. Delete old database
+del audit_history.db audit_history.db-shm audit_history.db-wal
 
-### Check Browser Console (F12):
-- No red errors
-- Should see successful API calls in Network tab
+# 2. Phase 1 — Scout (run once, wait for it to finish)
+audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --scout-only
+
+# 3. Phase 2 — LLM Analysis (run once, wait ~5 min for it to finish)
+audit_tool\venv\Scripts\python.exe mcp_agent\agent.py
+
+# 4. Start API server (keep terminal open)
+audit_tool\venv\Scripts\python.exe report\api_server.py
+
+# 5. Start frontend (keep terminal open, run from project root)
+cd report\frontend && npm run dev
+
+# 6. Open browser
+# http://localhost:5173/dashboard
+```
 
 ---
 
 ## Troubleshooting
 
-### Problem: "Database not found"
-**Solution:**
+**"No module named flask"**
 ```bash
-# Make sure you ran Phase 1 first
-python audit_tool/run_audit.py
+audit_tool\venv\Scripts\pip install flask flask-cors
 ```
 
-### Problem: "Failed to connect to API server"
-**Solution:**
-```bash
-# Make sure Flask API is running
-python report/api_server.py
+**"Database not found" in API**
+- Make sure you ran Steps 2 and 3 first
+- Check `audit_history.db` exists in the project root
 
-# Check if port 5000 is available
-netstat -ano | findstr :5000
-```
+**Frontend shows no data / loading spinner stuck**
+- Make sure the Flask API is running (Step 5)
+- Check browser console for CORS or network errors
+- Verify `curl http://localhost:5000/api/summary` returns data
 
-### Problem: "Port 3000 already in use"
-**Solution:**
-```bash
-# Kill process on port 3000
-netstat -ano | findstr :3000
-taskkill /PID <PID> /F
+**LLM agent hangs or times out**
+- Check your `.env` has correct `OPENWEBUI_BASE_URL` and `OPENWEBUI_API_KEY`
+- Check the LLM endpoint is reachable: `curl http://164.52.196.104:8084/api/v1/models`
+- Set `AI_FILE_LIMIT=5` in `.env` to test with just 5 files first
 
-# Or change port in vite.config.js
-```
-
-### Problem: "LLM connection failed"
-**Solution:**
-```bash
-# Check .env file has correct credentials
-cat .env
-
-# Test LLM endpoint
-curl -X POST http://your-llm-endpoint/api/v1/chat/completions \
-  -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gemma3:latest","messages":[{"role":"user","content":"test"}]}'
-```
-
-### Problem: "No files showing in sidebar"
-**Solution:**
-```bash
-# Check if database has data
-python -c "import sqlite3; conn = sqlite3.connect('audit_history.db'); print(conn.execute('SELECT COUNT(*) FROM vue_files').fetchone()[0])"
-
-# If 0, run Phase 1 again
-python audit_tool/run_audit.py
-```
-
----
-
-## Quick Reference: All Commands
-
-```bash
-# 1. Delete database
-rm audit_history.db
-
-# 2. Run Phase 1 (Scout)
-python audit_tool/run_audit.py
-
-# 3. Run Phase 2-3 (LLM Agent)
-python mcp_agent/agent.py
-
-# 4. Start Flask API (Terminal 1)
-python report/api_server.py
-
-# 5. Start Vue Frontend (Terminal 2)
-cd report/frontend
-npm run dev
-
-# 6. Open browser
-# http://localhost:3000
-```
-
----
-
-## Expected Timeline
-
-| Phase | Time | What Happens |
-|-------|------|--------------|
-| Phase 1 (Scout) | 30s - 2min | AST parsing, ESLint scanning |
-| Phase 2-3 (LLM) | 2-15min | LLM analysis of each file |
-| Flask API | Instant | Server starts immediately |
-| Vue Frontend | 5-10s | Vite dev server starts |
-| **Total** | **3-17min** | Complete fresh run |
-
----
-
-## What Gets Created
-
-```
-audit_history.db          # SQLite database with all findings
-scan.log                  # Log file (if configured)
-```
-
-**Database tables populated:**
-- `vue_files` - 75 files with metrics
-- `api_calls` - All detected API calls
-- `file_flags` - ESLint findings
-- `accessibility_defects` - A11y issues
-- `ai_issues` - LLM-generated findings
-- `audit_runs` - Run metadata with synthesis
-- `component_relationships` - Import graph
-
----
-
-## Success Criteria
-
-✅ Database created and populated  
-✅ Flask API returns data on all endpoints  
-✅ Vue frontend loads without errors  
-✅ Sidebar shows all files with badges  
-✅ Search filtering works  
-✅ File selection works  
-✅ No console errors in browser  
-✅ API logs show successful requests  
-
----
-
-## Next Steps After Fresh Run
-
-Once everything is working:
-
-1. **Explore the data**: Click through different files
-2. **Test search**: Filter files by name
-3. **Check API responses**: Use curl to inspect data
-4. **Review executive summary**: Check `/api/executive-summary`
-5. **Proceed to Stage 7 Part 2**: Build Dashboard Overview
-
----
-
-## Stop Everything
-
-When you're done:
-
-```bash
-# Terminal 1 (Flask API)
-Ctrl+C
-
-# Terminal 2/3 (Vue Frontend)
-Ctrl+C
-```
-
----
-
-**You're ready to run everything from scratch!** 🚀
-
-Follow the steps in order, and you'll have a complete fresh analysis in 3-17 minutes.
+**Port already in use**
+- Flask default: 5000. Kill any process using it.
+- Vite default: 5173. Kill any process using it.
+- On Windows: `netstat -ano | findstr :5000` then `taskkill /PID <pid> /F`

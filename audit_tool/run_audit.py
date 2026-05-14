@@ -118,16 +118,16 @@ from extractors.eslint_extractor import run_eslint_scan, parse_eslint_results
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-def main():
-    print()
-    print("=" * 65)
+def _run_scout_phase():
+    logger.info("")
+    logger.info("=" * 65)
     sqlite_path = Path(cfg.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db"))
 
-    print("  Code Audit Librarian — Full Project Scan")
-    print(f"  Source : {BASE_PATH}")
-    print(f"  SQLite : {sqlite_path}")
-    print(f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 65)
+    logger.info("  Code Audit Librarian — Full Project Scan")
+    logger.info(f"  Source : {BASE_PATH}")
+    logger.info(f"  SQLite : {sqlite_path}")
+    logger.info(f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 65)
 
     # 1. Setup SQLite schema
     logger.info("Setting up SQLite schema...")
@@ -152,7 +152,7 @@ def main():
         len(results),
         len(dirty_files),
     )
-    print(f"\n[DEBUG] Total files marked as dirty: {len(dirty_files)}")
+    logger.info(f"[DEBUG] Total files marked as dirty: {len(dirty_files)}")
 
     # 4. Write to DB (only dirty files)
     logger.info("Writing dirty file results to SQLite...")
@@ -194,7 +194,7 @@ def main():
                         eslint_counts["file_flags"],
                         eslint_counts["accessibility_defects"],
                     )
-                    print(
+                    logger.info(
                         f"ESLint found {eslint_counts['accessibility_defects']} accessibility issues"
                     )
                 else:
@@ -206,10 +206,7 @@ def main():
     else:
         logger.info("Skipping ESLint scan - no dirty files found (all files unchanged)")
 
-    # 5. Save combined JSON (Removed: Relying entirely on the DB export)
-
-    # 7. Summary table
-    # Only count flags from files that were actually processed (not skipped)
+    # 6. Summary table
     processed_results = [r for r in results if not r.get("skipped")]
     skipped_results = [r for r in results if r.get("skipped")]
 
@@ -218,228 +215,163 @@ def main():
     flagged = [r for r in ok if r["flags_count"] > 0]
     clean = [r for r in ok if r["flags_count"] == 0]
 
-    # Top 10 most flagged files (from processed files only)
     top10 = sorted(ok, key=lambda r: r["flags_count"], reverse=True)[:10]
 
-    print()
-    print("=" * 65)
-    print("  INCREMENTAL SCAN SUMMARY")
-    print("=" * 65)
-    print(f"  Total files found   : {len(results)}")
-    print(f"  Files processed     : {len(processed_results)}")
-    print(f"  Files skipped       : {len(skipped_results)}")
-    print(f"  Errors              : {errors}")
-    print(f"  Clean files         : {len(clean)}")
-    print(f"  Flagged files       : {len(flagged)}")
-    print(f"  Total flags         : {total_flags}")
-    print(f"  Elapsed time        : {elapsed:.1f}s")
-    print()
-    print("  TOP 10 MOST FLAGGED FILES:")
-    print(f"  {'File':<45} {'Flags':>5}  Triggered")
-    print("  " + "-" * 62)
+    logger.info("")
+    logger.info("=" * 65)
+    logger.info("  INCREMENTAL SCAN SUMMARY")
+    logger.info("=" * 65)
+    logger.info(f"  Total files found   : {len(results)}")
+    logger.info(f"  Files processed     : {len(processed_results)}")
+    logger.info(f"  Files skipped       : {len(skipped_results)}")
+    logger.info(f"  Errors              : {errors}")
+    logger.info(f"  Clean files         : {len(clean)}")
+    logger.info(f"  Flagged files       : {len(flagged)}")
+    logger.info(f"  Total flags         : {total_flags}")
+    logger.info(f"  Elapsed time        : {elapsed:.1f}s")
+    logger.info("")
+    logger.info("  TOP 10 MOST FLAGGED FILES:")
+    logger.info(f"  {'File':<45} {'Flags':>5}  Triggered")
+    logger.info("  " + "-" * 62)
     for r in top10:
         fname = Path(r["file"]).name
         flag_names = [
             f["flag"] if isinstance(f, dict) else f for f in r["flags_triggered"]
         ]
-        print(
+        logger.info(
             f"  {fname:<45} {r['flags_count']:>5}  {', '.join(flag_names[:3])}{'...' if len(flag_names) > 3 else ''}"
         )
-    print()
-    print(f"  DB   : sqlite ({len(processed_results)} new/updated rows)")
+    logger.info("")
+    logger.info(f"  DB   : sqlite ({len(processed_results)} new/updated rows)")
+    logger.info("Scout Phase Complete.")
 
-    logger.info("Skipping legacy Task 3-7 pipeline (disabled for SQLite migration)")
-    return
 
-    # NEW STEP: Extract UI elements (Task 4)
-    # Gate 1: dirty files (changed content)
-    # Gate 2: files in vue_files for this project with NO ui_extractions rows yet
-    #         (covers the case where the project_name changed but files are unchanged)
-    task4_files = list(dirty_files)  # start with dirty files
-
-    try:
-        from db.db_writer import _get_connection
-
-        _conn = _get_connection(cfg)
-        _cur = _conn.cursor()
-        _cur.execute(
-            """
-            SELECT vf.file_path
-            FROM vue_files vf
-            LEFT JOIN ui_extractions ue ON vf.id = ue.file_id AND ue.project_name = %s
-            WHERE vf.project_name = %s AND ue.id IS NULL
-            """,
-            (project_name, project_name),
-        )
-        missing_rows = _cur.fetchall()
-        _cur.close()
-        _conn.close()
-
-        if missing_rows:
-            # Reconstruct absolute paths from relative DB paths
-            missing_abs = []
-            for (rel_path,) in missing_rows:
-                # normalize_path stores paths relative to BASE_PATH e.g. 'components/Foo.vue'
-                # so the absolute path is: Path(BASE_PATH) / rel_path (NOT .parent)
-                candidate = Path(BASE_PATH) / rel_path
-                if candidate.exists():
-                    missing_abs.append(str(candidate))
-                else:
-                    # Fallback: filename search under BASE_PATH
-                    fname = Path(rel_path).name
-                    found = list(Path(BASE_PATH).rglob(fname))
-                    if found:
-                        missing_abs.append(str(found[0]))
-                    else:
-                        logger.warning(
-                            "Task 4: could not resolve path for DB entry '%s'", rel_path
-                        )
-            # Add without duplicating already-dirty files
-            existing_set = {str(Path(f).resolve()) for f in task4_files}
-            for p in missing_abs:
-                if str(Path(p).resolve()) not in existing_set:
-                    task4_files.append(p)
-            if missing_abs:
-                logger.info(
-                    "Task 4: found %d files in vue_files with no ui_extractions for project '%s' — adding to Task 4 run",
-                    len(missing_abs),
-                    project_name,
-                )
-    except Exception as e:
-        logger.warning("Could not query for missing ui_extractions: %s", e)
-
-    if task4_files:
-        try:
-            if str(BASE / "task4") not in sys.path:
-                sys.path.insert(0, str(BASE / "task4"))
-            from task4_ui_extractor import main as task4_main
-
-            print()
-            print("=" * 65)
-            print("  TASK 4: VUE UI EXTRACTION SCANNER")
-            print("=" * 65)
-            logger.info(
-                "Running Task 4 UI extraction on %d files (%d dirty, %d missing extractions)...",
-                len(task4_files),
-                len(dirty_files),
-                len(task4_files) - len(dirty_files),
-            )
-            task4_main(dirty_files=task4_files)
-        except Exception as e:
-            logger.error("Failed to run Task 4 UI Extractor: %s", e)
+def _run_ai_phase(resume: bool):
+    import builtins
+    logger.info("Starting AI Agent Phase...")
+    
+    # Monkeypatch input() to automatically pass the resume flag
+    original_input = builtins.input
+    if resume:
+        def mock_input(prompt=""):
+            logger.info(f"Auto-answering 'y' to AI agent prompt: {prompt}")
+            return "y"
+        builtins.input = mock_input
     else:
-        logger.info(
-            "Skipping Task 4 UI Extraction - no dirty files and all ui_extractions up to date"
-        )
+        def mock_input(prompt=""):
+            logger.info(f"Auto-answering 'n' to AI agent prompt: {prompt}")
+            return "n"
+        builtins.input = mock_input
 
-    # 7. Export Database to JSON
-    db_json_path = BASE / "task2_db_export.json"
-    logger.info("Exporting native database tables to %s...", db_json_path)
-    export_db_to_json(cfg, str(db_json_path))
-    print(f"  DB Export : {db_json_path}")
-
-    # 8. Generate Task 3 Component Complexity JSON
     try:
-        from task3.task3_exporter import main as task3_main
-
-        print()
-        print("=" * 65)
-        print("  TASK 3: COMPONENT COMPLEXITY SCANNER")
-        print("=" * 65)
-        task3_main()
+        from mcp_agent.agent import run_full_codebase_audit
+        run_full_codebase_audit()
+    except ImportError as e:
+        logger.error(f"Could not import AI agent: {e}")
     except Exception as e:
-        logger.error("Failed to run Task 3 exporter: %s", e)
+        logger.error(f"AI Agent failed: {e}")
+    finally:
+        builtins.input = original_input
+        logger.info("AI Agent Phase Complete.")
 
-    # 9. Task 5 UI Consistency and Spell Checker - GATED to only dirty files
-    # Skip if no dirty files (nothing changed)
-    if dirty_files:
-        try:
-            if str(BASE / "task5") not in sys.path:
-                sys.path.insert(0, str(BASE / "task5"))
-            from task5.ui_consistency_checker import main as task5_main
 
-            print()
-            print("=" * 65)
-            print("  TASK 5: UI CONSISTENCY & SPELL CHECKER")
-            print("=" * 65)
-            logger.info(
-                "Running targeted Task 5 UI consistency check on %d dirty files...",
-                len(dirty_files),
-            )
-            task5_main(cfg, dirty_files=dirty_files)
-        except Exception as e:
-            logger.error("Failed to run Task 5 checker: %s", e)
-    else:
-        logger.info(
-            "Skipping Task 5 UI Consistency Check - no dirty files (all files unchanged)"
-        )
-
-    # 10. Task 6 UI Accessibility & Usability Compliance Checker
-    # DISABLED: Now handled by eslint_extractor writing to accessibility_defects
-    # try:
-    #     if str(BASE / "task6") not in sys.path:
-    #         sys.path.insert(0, str(BASE / "task6"))
-    #     from task6.accessibility_checker import main as task6_main
-    #
-    #     print()
-    #     print("=" * 65)
-    #     print("  TASK 6: UI ACCESSIBILITY CHECKER")
-    #     print("=" * 65)
-    #     task6_main(cfg)
-    # except Exception as e:
-    #     logger.error("Failed to run Task 6 checker: %s", e)
-
-    # 11. Task 7 Unified Issue Detection Engine
+def _run_report_phase():
+    import subprocess
+    import sys
     try:
-        if str(BASE / "task7") not in sys.path:
-            sys.path.insert(0, str(BASE / "task7"))
-        import task7.issue_detector as task7_main
+        import psutil
+    except ImportError:
+        psutil = None
 
-        task7_main.main(cfg)
-    except Exception as e:
-        logger.error("Failed to run Task 7 Issue Detector: %s", e)
-
-    # 12. Database Cleanup Phase (Orphaned Files)
-    logger.info("Starting database cleanup for orphaned files...")
+    logger.info("Starting Report Phase (Frontend & Backend)...")
+    
+    # Resolve the base directory dynamically (project root is one level up from audit_tool)
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    backend_cmd = [sys.executable, os.path.join(base_dir, "report", "api_server.py")]
+    frontend_cmd = "npm run dev"
+    frontend_cwd = os.path.join(base_dir, "report", "frontend")
+    
+    logger.info(f"Launching Backend Server: {' '.join(backend_cmd)}")
+    backend_proc = subprocess.Popen(backend_cmd)
+    
+    logger.info(f"Launching Frontend Server: {frontend_cmd} (cwd: {frontend_cwd})")
+    frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_cwd, shell=True)
+    
     try:
-        from db.db_writer import cleanup_orphaned_files
-
-        cleanup_stats = cleanup_orphaned_files(cfg, BASE_PATH)
-
-        total_removed = (
-            cleanup_stats["vue_files_removed"]
-            + cleanup_stats["api_calls_removed"]
-            + cleanup_stats["file_flags_removed"]
-            + cleanup_stats["accessibility_defects_removed"]
-            + cleanup_stats["ui_extractions_removed"]
-            + cleanup_stats["ui_defects_removed"]
-        )
-
-        if total_removed > 0:
-            logger.info("Database cleanup completed:")
-            logger.info("  - Vue files removed: %d", cleanup_stats["vue_files_removed"])
-            logger.info("  - API calls removed: %d", cleanup_stats["api_calls_removed"])
-            logger.info(
-                "  - File flags removed: %d", cleanup_stats["file_flags_removed"]
-            )
-            logger.info(
-                "  - Accessibility defects removed: %d",
-                cleanup_stats["accessibility_defects_removed"],
-            )
-            logger.info(
-                "  - UI extractions removed: %d",
-                cleanup_stats["ui_extractions_removed"],
-            )
-            logger.info(
-                "  - UI defects removed: %d", cleanup_stats["ui_defects_removed"]
-            )
-            logger.info("  Total rows removed: %d", total_removed)
+        logger.info("Servers are running. Press Ctrl+C to shut down.")
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt received. Shutting down servers cleanly...")
+    finally:
+        logger.info("Killing backend process...")
+        if psutil:
+            try:
+                parent = psutil.Process(backend_proc.pid)
+                for child in parent.children(recursive=True):
+                    child.terminate()
+                parent.terminate()
+            except psutil.NoSuchProcess:
+                pass
         else:
-            logger.info("Database cleanup: No orphaned files found")
-    except Exception as e:
-        logger.error("Database cleanup failed: %s", e)
+            backend_proc.terminate()
+            
+        logger.info("Killing frontend process tree...")
+        if psutil:
+            try:
+                parent = psutil.Process(frontend_proc.pid)
+                for child in parent.children(recursive=True):
+                    child.terminate()
+                parent.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        else:
+            # Fallback for Windows shell=True process tree
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(frontend_proc.pid)], 
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL
+            )
+            frontend_proc.terminate()
+            
+        logger.info("Shutdown complete.")
 
-    # We remove the old final summary print here because task7.issue_detector handles it now.
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Code Audit Librarian Orchestrator")
+    parser.add_argument("--scout-only", action="store_true", help="Runs only Phase 1 (deterministic extractors) and exits.")
+    parser.add_argument("--ai-only", action="store_true", help="Runs the AI phase and exits.")
+    parser.add_argument("--resume", action="store_true", help="Resumes a previously interrupted run (for AI phase).")
+    parser.add_argument("--report-only", action="store_true", help="Boots the frontend and backend servers simultaneously and keeps them alive.")
+    
+    args = parser.parse_args()
+
+    run_scout = False
+    run_ai = False
+    run_report = False
+
+    if args.scout_only:
+        run_scout = True
+    elif args.ai_only:
+        run_ai = True
+    elif args.report_only:
+        run_report = True
+    else:
+        # Default: runs sequentially
+        run_scout = True
+        run_ai = True
+        run_report = True
+
+    if run_scout:
+        _run_scout_phase()
+    
+    if run_ai:
+        _run_ai_phase(resume=args.resume)
+    
+    if run_report:
+        _run_report_phase()
 
 
 if __name__ == "__main__":
