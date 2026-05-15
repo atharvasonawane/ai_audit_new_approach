@@ -104,6 +104,43 @@
         </div>
       </div>
 
+      <!-- Dependency Health -->
+      <div class="exec-panel" v-if="dependencySummary.total_nodes">
+        <div class="exec-label" style="color: var(--color-accent-primary);">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 8h8m-4-4v8"/>
+          </svg>
+          Dependency Health
+        </div>
+        <div class="dep-metrics-grid">
+          <div class="dep-metric">
+            <span class="dep-label">Total Files</span>
+            <span class="dep-value">{{ dependencySummary.total_nodes }}</span>
+          </div>
+          <div class="dep-metric">
+            <span class="dep-label">Total Edges</span>
+            <span class="dep-value">{{ dependencySummary.total_edges }}</span>
+          </div>
+          <div class="dep-metric">
+            <span class="dep-label">Max Depth</span>
+            <span class="dep-value">{{ dependencySummary.max_depth }}</span>
+          </div>
+          <div class="dep-metric">
+            <span class="dep-label">Orphans <span v-if="dependencySummary.orphan_count > 0" title="Warning">⚠️</span></span>
+            <span class="dep-value" :class="{'accent-amber': dependencySummary.orphan_count > 0}">{{ dependencySummary.orphan_count }}</span>
+          </div>
+          <div class="dep-metric">
+            <span class="dep-label">Circular Deps <span v-if="dependencySummary.cycle_count > 0" title="Danger">🔴</span></span>
+            <span class="dep-value" :class="{'accent-red': dependencySummary.cycle_count > 0}">{{ dependencySummary.cycle_count }}</span>
+          </div>
+        </div>
+        <div class="dep-critical" v-if="dependencySummary.most_critical_file">
+          <span class="dep-label">Most Critical File:</span>
+          <span class="offender-name">{{ getFileName(dependencySummary.most_critical_file) }}</span>
+          <span class="dep-sub"> (In-degree: {{ dependencySummary.most_critical_file_in_degree }})</span>
+        </div>
+      </div>
+
       <!-- Charts -->
       <div class="charts-grid">
         <div class="chart-card">
@@ -198,6 +235,7 @@ const error = ref(null)
 const summary = ref({})
 const executiveSummary = ref({})
 const worstOffenders = ref([])
+const dependencySummary = ref({})
 
 const severityChartData = computed(() => {
   const s = summary.value.ai_issues_by_severity || {}
@@ -241,12 +279,14 @@ const categoryChartOptions = {
 const fetchDashboardData = async () => {
   loading.value = true; error.value = null
   try {
-    const [summaryRes, executiveRes, offendersRes] = await Promise.all([
-      filesAPI.getSummary(), filesAPI.getExecutiveSummary(), filesAPI.getWorstOffenders(10)
+    const [summaryRes, executiveRes, offendersRes, depSummaryRes] = await Promise.all([
+      filesAPI.getSummary(), filesAPI.getExecutiveSummary(), filesAPI.getWorstOffenders(10),
+      filesAPI.getDependencySummary().catch(() => ({ data: {} }))
     ])
     summary.value = summaryRes.data || {}
     executiveSummary.value = executiveRes.data || {}
     worstOffenders.value = offendersRes.data || []
+    dependencySummary.value = depSummaryRes.data || {}
   } catch (err) {
     if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
       error.value = 'Cannot connect to API server. Ensure Flask is running on http://localhost:5000'
@@ -398,6 +438,45 @@ onMounted(fetchDashboardData)
   grid-template-columns: repeat(6, 1fr);
   gap: 12px;
 }
+
+.dep-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+.dep-metric {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--rounded-base);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+}
+.dep-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.dep-value {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+.dep-critical {
+  font-size: 13px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dep-sub { color: var(--color-text-tertiary); font-family: var(--font-mono); }
 
 @media (max-width: 1100px) { .metrics-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 700px)  { .metrics-grid { grid-template-columns: repeat(2, 1fr); } }

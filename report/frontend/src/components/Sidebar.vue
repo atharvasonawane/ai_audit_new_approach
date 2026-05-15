@@ -44,6 +44,16 @@
         </svg>
         <span>Audit Explorer</span>
       </router-link>
+
+      <router-link to="/graph" class="nav-item" :class="{ active: isActive('/graph') }">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="8" cy="8" r="2"/>
+          <circle cx="3" cy="3" r="2"/>
+          <circle cx="13" cy="13" r="2"/>
+          <path d="M4.5 4.5l2 2M9.5 9.5l2 2"/>
+        </svg>
+        <span>Dependency Graph</span>
+      </router-link>
     </nav>
 
     <!-- Footer -->

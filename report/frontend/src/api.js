@@ -68,6 +68,13 @@ export const filesAPI = {
   
   // Get worst offenders
   getWorstOffenders: (limit = 10) => api.get(`/worst-offenders?limit=${limit}`),
+  
+  // Get dependency summary
+  getDependencySummary: () => api.get('/dependency-summary'),
+  
+  // Get full dependency graph
+  getDependencyGraph: () => api.get('/dependency-graph'),
+
 }
 
 export default api

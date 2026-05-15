@@ -21,6 +21,11 @@ const routes = [
     name: 'SplitPaneExplorer',
     component: () => import('../views/SplitPaneExplorer.vue'),
   },
+  {
+    path: '/graph',
+    name: 'DependencyGraph',
+    component: () => import('../components/DependencyGraph.vue'),
+  },
 ]
 
 const router = createRouter({
