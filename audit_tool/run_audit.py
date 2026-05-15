@@ -104,6 +104,112 @@ cfg["db"]["database"] = os.getenv(
     "MYSQL_DATABASE", cfg["db"].get("database", "code_audit_db")
 )
 
+"""
+run_audit.py
+============
+Top-level entry point for the Code Audit Librarian.
+
+Usage:
+    venv\\Scripts\\python.exe run_audit.py
+
+What it does:
+    1. Reads project_config.yaml
+    2. Creates / updates the MySQL schema
+    3. Scans every .vue file under base_path
+    4. Writes results to MySQL (vue_files, api_calls, file_flags)
+    5. Saves a combined JSON report: scan_report.json
+    6. Prints a summary table to console
+"""
+
+import sys
+import json
+import logging
+import time
+import os
+from pathlib import Path
+from datetime import datetime
+from dotenv import load_dotenv
+
+# ── Setup ────────────────────────────────────────────────────────────────────
+BASE = Path(__file__).parent
+PROJECT_ROOT = BASE.parent
+TASK2_BASE = BASE / "task2_audit"
+CONFIG_PATH = str(BASE / "config" / "project_config.yaml")
+
+# Ensure the project root is on sys.path so the SQLite db package resolves first
+if str(PROJECT_ROOT) in sys.path:
+    sys.path.remove(str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Insert task2_audit into sys.path so inner imports (extractors) resolve
+if str(TASK2_BASE) in sys.path:
+    sys.path.remove(str(TASK2_BASE))
+sys.path.insert(1, str(TASK2_BASE))
+
+import yaml
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s %(name)s -- %(message)s",
+    datefmt="%H:%M:%S",
+)
+
+file_handler = logging.FileHandler(str(BASE.parent / "scan.log"), encoding="utf-8")
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
+logging.getLogger().addHandler(file_handler)
+
+# Silence noisy sub-loggers during scan
+for noisy in (
+    "extractors.vue_parser",
+    "extractors.script_cleaner",
+    "extractors.api_extractor",
+    "extractors.complexity_checker",
+    "extractors.template_extractor",
+):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
+
+logger = logging.getLogger("run_audit")
+
+# ── Load config ───────────────────────────────────────────────────────────────
+cfg = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
+
+if "project_name" not in cfg:
+    logger.error(
+        "Error: 'project_name' key must exist at the root level of project_config.yaml"
+    )
+    sys.exit(1)
+
+project_name = cfg["project_name"]
+# Dynamically set the module name. Priority:
+# 1. Explicit 'module' field in config (if set and non-empty)
+# 2. 'project_name' field from config
+# 3. Heuristic: parent folder name of base_path
+if not cfg.get("module"):
+    if cfg.get("project_name"):
+        cfg["module"] = cfg["project_name"]
+    else:
+        base_path_str = cfg.get("base_path", "").replace("\\", "/").rstrip("/")
+        if base_path_str:
+            # Use the leaf folder name as module identifier
+            cfg["module"] = Path(base_path_str).name
+        else:
+            cfg["module"] = "unknown"
+
+# Load environment variables and override database credentials safely
+load_dotenv()
+if "db" not in cfg:
+    cfg["db"] = {}
+cfg["db"]["host"] = os.getenv("MYSQL_HOST", cfg["db"].get("host", "localhost"))
+cfg["db"]["port"] = int(os.getenv("MYSQL_PORT", cfg["db"].get("port", 3306)))
+cfg["db"]["user"] = os.getenv("MYSQL_USER", cfg["db"].get("user", "root"))
+cfg["db"]["password"] = os.getenv("MYSQL_PASSWORD", cfg["db"].get("password", ""))
+cfg["db"]["database"] = os.getenv(
+    "MYSQL_DATABASE", cfg["db"].get("database", "code_audit_db")
+)
+
 BASE_PATH = cfg.get("base_path", "")
 
 if not Path(BASE_PATH).exists():
@@ -115,6 +221,11 @@ from extractors.orchestrator import scan_all_vue_files
 from db.db_init import init_db
 from db.db_writer import get_all_file_hashes, write_eslint_results, write_scan_result
 from extractors.eslint_extractor import run_eslint_scan, parse_eslint_results
+
+from graph.import_extractor import run_import_extraction
+from graph.graph_builder import build_graph
+from graph.graph_analyzer import analyze_graph
+from graph.graph_exporter import export_graph
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -246,6 +357,31 @@ def _run_scout_phase():
     logger.info("Scout Phase Complete.")
 
 
+def _run_graph_phase():
+    logger.info("")
+    logger.info("=" * 65)
+    logger.info("  Phase 1.5: Dependency Graph")
+    logger.info("=" * 65)
+    sqlite_path = str(Path(cfg.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db")))
+    frontend_dir = str(PROJECT_ROOT / "report" / "frontend" / "public")
+
+    logger.info("Running import extraction...")
+    run_import_extraction(BASE_PATH, project_name, sqlite_path)
+
+    logger.info("Building dependency graph...")
+    G = build_graph(project_name, sqlite_path)
+    
+    if G and G.number_of_nodes() > 0:
+        logger.info("Analyzing graph metrics...")
+        metrics = analyze_graph(G)
+        logger.info("Exporting graph data...")
+        export_graph(G, metrics, project_name, sqlite_path, frontend_dir)
+    else:
+        logger.warning("Graph is empty, skipping analysis and export.")
+    
+    logger.info("Dependency Graph Phase Complete.")
+
+
 def _run_ai_phase(resume: bool):
     import builtins
     logger.info("Starting AI Agent Phase...")
@@ -342,6 +478,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Code Audit Librarian Orchestrator")
     parser.add_argument("--scout-only", action="store_true", help="Runs only Phase 1 (deterministic extractors) and exits.")
+    parser.add_argument("--graph-only", action="store_true", help="Runs only Phase 1.5 (Dependency Graph) and exits.")
     parser.add_argument("--ai-only", action="store_true", help="Runs the AI phase and exits.")
     parser.add_argument("--resume", action="store_true", help="Resumes a previously interrupted run (for AI phase).")
     parser.add_argument("--report-only", action="store_true", help="Boots the frontend and backend servers simultaneously and keeps them alive.")
@@ -349,11 +486,14 @@ def main():
     args = parser.parse_args()
 
     run_scout = False
+    run_graph = False
     run_ai = False
     run_report = False
 
     if args.scout_only:
         run_scout = True
+    elif args.graph_only:
+        run_graph = True
     elif args.ai_only:
         run_ai = True
     elif args.report_only:
@@ -361,11 +501,15 @@ def main():
     else:
         # Default: runs sequentially
         run_scout = True
+        run_graph = True
         run_ai = True
         run_report = True
 
     if run_scout:
         _run_scout_phase()
+    
+    if run_graph:
+        _run_graph_phase()
     
     if run_ai:
         _run_ai_phase(resume=args.resume)

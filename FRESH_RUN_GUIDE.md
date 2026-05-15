@@ -23,10 +23,8 @@ If Flask or Vite are already running, kill them first (Ctrl+C in their terminals
 
 ## Step 2 — Delete the existing database
 
-```bash
-del audit_history.db
-del audit_history.db-shm
-del audit_history.db-wal
+```powershell
+Remove-Item -Path audit_history.db, audit_history.db-shm, audit_history.db-wal -ErrorAction SilentlyContinue
 ```
 
 These three files together make up the SQLite database. Deleting them gives you a completely clean slate.
@@ -233,27 +231,31 @@ After completing all steps, confirm:
 
 ### Option A: The Unified Orchestrator (New)
 ```bash
-# 1. Delete old database
-del audit_history.db audit_history.db-shm audit_history.db-wal
+# 1. Delete old database (PowerShell)
+Remove-Item -Path audit_history.db, audit_history.db-shm, audit_history.db-wal -ErrorAction SilentlyContinue
 
 # 2. Run the full pipeline (Scout -> AI Agent -> Start Servers automatically)
 audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py
 
 # You can also run stages independently using the unified CLI:
 # audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --scout-only
+# audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --graph-only
 # audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --ai-only
 # audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --report-only
 ```
 
 ### Option B: Individual Scripts (Legacy)
 ```bash
-# 1. Delete old database
-del audit_history.db audit_history.db-shm audit_history.db-wal
+# 1. Delete old database (PowerShell)
+Remove-Item -Path audit_history.db, audit_history.db-shm, audit_history.db-wal -ErrorAction SilentlyContinue
 
 # 2. Phase 1 — Scout (run once, wait for it to finish)
 audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --scout-only
 
-# 3. Phase 2 — LLM Analysis (run once, wait ~5 min for it to finish)
+# 3. Phase 1.5 — Dependency Graph (run once)
+audit_tool\venv\Scripts\python.exe audit_tool\run_audit.py --graph-only
+
+# 4. Phase 2 — LLM Analysis (run once, wait ~5 min for it to finish)
 audit_tool\venv\Scripts\python.exe mcp_agent\agent.py
 
 # 4. Start API server (keep terminal open)
