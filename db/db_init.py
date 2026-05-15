@@ -156,3 +156,36 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS unresolved_imports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL,
+            parent_file TEXT NOT NULL,
+            raw_import TEXT NOT NULL,
+            reason TEXT,
+            scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dependency_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            in_degree INTEGER DEFAULT 0,
+            out_degree INTEGER DEFAULT 0,
+            depth INTEGER DEFAULT 0,
+            impact_score REAL DEFAULT 0,
+            node_category TEXT DEFAULT 'standard',
+            is_in_cycle INTEGER DEFAULT 0,
+            cycle_members TEXT,
+            dependents TEXT,
+            dependencies TEXT,
+            UNIQUE(project_name, file_path)
+        )
+        """
+    )
