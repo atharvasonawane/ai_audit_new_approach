@@ -600,6 +600,151 @@ def get_run_status():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/dependency-graph", methods=["GET"])
+def get_dependency_graph():
+    """
+    GET /api/dependency-graph
+    Returns the full graph.json content.
+    """
+    try:
+        # Assuming the graph.json is written to report/frontend/public/graph.json
+        graph_path = PROJECT_ROOT / "report" / "frontend" / "public" / "graph.json"
+        if not graph_path.exists():
+            return jsonify({"error": "graph.json not found"}), 404
+            
+        with open(graph_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dependency-summary", methods=["GET"])
+def get_dependency_summary():
+    """
+    GET /api/dependency-summary
+    Returns only the summary block from graph.json.
+    """
+    try:
+        graph_path = PROJECT_ROOT / "report" / "frontend" / "public" / "graph.json"
+        if not graph_path.exists():
+            return jsonify({"error": "graph.json not found"}), 404
+            
+        with open(graph_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return jsonify(data.get("summary", {}))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def get_transitive_dependents(file_path: str) -> list:
+    """Helper to compute transitive dependents dynamically via BFS on component_relationships"""
+    conn = _db_connect()
+    rows = conn.execute("SELECT parent_file, child_file FROM component_relationships WHERE project_name = ?", (PROJECT_NAME,)).fetchall()
+    conn.close()
+    
+    # build reverse adjacency list (child -> list of parents)
+    adj = {}
+    for r in rows:
+        p, c = r["parent_file"], r["child_file"]
+        if c not in adj:
+            adj[c] = []
+        adj[c].append(p)
+        
+    visited = set()
+    queue = [file_path]
+    while queue:
+        curr = queue.pop(0)
+        for p in adj.get(curr, []):
+            if p not in visited:
+                visited.add(p)
+                queue.append(p)
+    return list(visited)
+
+
+@app.route("/api/file-dependencies/<path:file_path>", methods=["GET"])
+def get_file_dependencies(file_path: str):
+    """
+    GET /api/file-dependencies/<path:file_path>
+    Returns dependency metrics for one specific file, including transitive impact.
+    """
+    try:
+        conn = _db_connect()
+        row = conn.execute(
+            """
+            SELECT * FROM dependency_metrics
+            WHERE project_name = ? AND file_path = ?
+            """,
+            (PROJECT_NAME, file_path)
+        ).fetchone()
+        conn.close()
+        
+        if not row:
+            return jsonify({"error": "File not found in dependency metrics"}), 404
+            
+        data = _row_to_dict(row)
+        
+        # Format exactly as requested
+        result = {
+            "file_path": data["file_path"],
+            "category": data["node_category"],
+            "in_degree": data["in_degree"],
+            "out_degree": data["out_degree"],
+            "impact_score": data["impact_score"],
+            "is_in_cycle": bool(data["is_in_cycle"]),
+            "dependencies": json.loads(data["dependencies"] or "[]"),
+            "dependents": json.loads(data["dependents"] or "[]"),
+            "transitive_impact": get_transitive_dependents(data["file_path"]),
+            "cycle": json.loads(data["cycle_members"] or "[]") if data["is_in_cycle"] else None
+        }
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/orphans", methods=["GET"])
+def get_orphans():
+    """
+    GET /api/orphans
+    Returns list of all orphan nodes with their metadata.
+    """
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            """
+            SELECT file_path, in_degree, out_degree, impact_score, node_category 
+            FROM dependency_metrics 
+            WHERE project_name = ? AND node_category = 'orphan'
+            """,
+            (PROJECT_NAME,)
+        ).fetchall()
+        conn.close()
+        
+        orphans = [_row_to_dict(r) for r in rows]
+        return jsonify(orphans)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cycles", methods=["GET"])
+def get_cycles():
+    """
+    GET /api/cycles
+    Returns all detected cycles from graph.json.
+    """
+    try:
+        graph_path = PROJECT_ROOT / "report" / "frontend" / "public" / "graph.json"
+        if not graph_path.exists():
+            return jsonify([])
+            
+        with open(graph_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return jsonify(data.get("cycles", []))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/health", methods=["GET"])
 def health_check():
     """Health check endpoint."""
