@@ -75,6 +75,9 @@ export const filesAPI = {
   // Get full dependency graph
   getDependencyGraph: () => api.get('/dependency-graph'),
 
+  // Get dependency data for a specific file (imports, dependents, impact, cycle)
+  getFileDependencies: (filePath) => api.get(`/file-dependencies/${filePath}`),
+
 }
 
 export default api

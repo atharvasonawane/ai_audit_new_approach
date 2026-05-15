@@ -1,6 +1,28 @@
 <template>
   <div class="dependency-graph-container">
-    <div class="graph-controls">
+    <!-- View Mode Toggle -->
+    <div class="view-toggle-bar">
+      <button class="vt-btn" :class="{ active: viewMode === 'graph' }" @click="viewMode = 'graph'">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="8" cy="8" r="2"/><circle cx="2" cy="2" r="1.5"/><circle cx="14" cy="14" r="1.5"/>
+          <path d="M3.5 3.5l3 3M9.5 9.5l3 3"/>
+        </svg>
+        Graph
+      </button>
+      <button class="vt-btn" :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+          <rect x="1" y="1" width="14" height="14" rx="1"/>
+          <path d="M1 5h14M1 9h14M1 13h14M5 1v14"/>
+        </svg>
+        Table
+      </button>
+    </div>
+
+    <!-- Table View -->
+    <DependencyTable v-if="viewMode === 'table'" class="dep-table-fill" />
+
+    <!-- Graph Controls (only in graph mode) -->
+    <div v-if="viewMode === 'graph'" class="graph-controls">
       <input type="text" v-model="searchQuery" placeholder="Search files..." class="search-box" @input="highlightSearch" />
       <div class="toggles">
         <label><input type="checkbox" v-model="filters.component" /> Component</label>
@@ -14,12 +36,12 @@
         <button class="btn-toggle" :class="{active: showCyclesOnly}" @click="toggleCycles">Show Cycles Only</button>
       </div>
     </div>
-    
-    <div class="graph-wrapper" ref="graphWrapper">
+
+    <div v-if="viewMode === 'graph'" class="graph-wrapper" ref="graphWrapper">
       <svg ref="svgRef" class="d3-svg"></svg>
       
       <!-- Tooltip -->
-      <div v-if="tooltip.visible" class="d3-tooltip" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
+      <div v-if="tooltip.visible && viewMode === 'graph'" class="d3-tooltip" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
         <div class="tt-title">{{ tooltip.data.basename }}</div>
         <div class="tt-cat" :style="{color: getNodeColor(tooltip.data)}">{{ tooltip.data.category }}</div>
         <div class="tt-metrics">
@@ -36,6 +58,9 @@
 import { ref, onMounted, watch, onBeforeUnmount } from 'vue'
 import * as d3 from 'd3'
 import { filesAPI } from '../api.js'
+import DependencyTable from './DependencyTable.vue'
+
+const viewMode = ref('graph')
 
 const svgRef = ref(null)
 const graphWrapper = ref(null)
@@ -343,6 +368,39 @@ const dragended = (event, d) => {
   border-radius: var(--rounded-lg);
   overflow: hidden;
 }
+
+/* View toggle bar */
+.view-toggle-bar {
+  display: flex;
+  gap: 2px;
+  padding: 8px 14px;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.vt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--rounded-base);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms;
+}
+.vt-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover, var(--color-bg-tertiary)); }
+.vt-btn.active {
+  background: rgba(56,139,253,0.15);
+  color: var(--color-accent-hover, #58A6FF);
+  border-color: rgba(56,139,253,0.25);
+}
+
+.dep-table-fill { flex: 1; overflow: hidden; }
 
 .graph-controls {
   padding: 16px;
