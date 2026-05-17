@@ -1,535 +1,147 @@
 <template>
-  <!-- Backdrop Overlay -->
-  <Transition name="fade">
-    <div
-      v-if="isOpen"
-      class="command-palette-backdrop"
-      @click="closeModal"
-    >
-      <!-- Modal Container -->
-      <div
-        class="command-palette-modal"
-        @click.stop
-      >
-        <!-- Search Input -->
-        <div class="search-container">
-          <Search 
-            :size="20" 
-            :stroke-width="2" 
-            class="search-icon"
-          />
-          <input
-            ref="searchInput"
-            v-model="searchQuery"
-            type="text"
-            placeholder="Search files..."
-            class="search-input"
-            @keydown.down.prevent="navigateDown"
-            @keydown.up.prevent="navigateUp"
-            @keydown.enter.prevent="selectFile"
-          />
-        </div>
-
-        <!-- Results Area -->
-        <div class="results-container">
-          <!-- Loading State -->
-          <div v-if="loading" class="results-loading">
-            <Loader2 
-              :size="24" 
-              :stroke-width="2" 
-              class="animate-spin text-accent-primary"
+  <teleport to="body">
+    <transition name="palette-fade">
+      <div v-if="isOpen" class="fixed inset-0 z-[9999] bg-black/55 backdrop-blur-sm flex items-start justify-center pt-[15vh]" @click.self="close" @keydown.esc="close">
+        <div class="palette-modal bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-[14px] w-[560px] max-w-[calc(100vw-40px)] overflow-hidden" role="dialog" aria-label="Command Palette">
+          <!-- Search Input -->
+          <div class="flex items-center gap-3 py-4 px-5 border-b border-gray-200 dark:border-gray-800">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400 dark:text-gray-500 shrink-0">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input
+              ref="inputRef"
+              v-model="query"
+              type="text"
+              placeholder="Search pages, files..."
+              class="flex-1 text-[16px] font-normal bg-transparent text-gray-900 dark:text-gray-50 border-none outline-none placeholder-gray-400 dark:placeholder-gray-500 focus:ring-0 caret-gray-900 dark:caret-white"
+              @keydown.esc="close"
+              @keydown.arrow-down.prevent="moveDown"
+              @keydown.arrow-up.prevent="moveUp"
+              @keydown.enter="selectCurrent"
             />
-            <p class="text-text-secondary text-sm">Loading files...</p>
+            <kbd class="text-[11px] font-semibold py-0.5 px-1.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 shrink-0">Esc</kbd>
           </div>
 
-          <!-- Error State -->
-          <div v-else-if="error" class="results-empty">
-            <AlertCircle 
-              :size="32" 
-              :stroke-width="2" 
-              class="text-severity-error mb-2"
-            />
-            <p class="text-text-secondary text-sm">{{ error }}</p>
-          </div>
-
-          <!-- Empty State -->
-          <div v-else-if="filteredFiles.length === 0" class="results-empty">
-            <FileSearch 
-              :size="32" 
-              :stroke-width="1.5" 
-              class="text-text-tertiary mb-2"
-            />
-            <p class="text-text-secondary text-sm">
-              {{ searchQuery ? 'No files found' : 'Start typing to search...' }}
-            </p>
-          </div>
-
-          <!-- Results List -->
-          <div v-else class="results-list">
+          <!-- Results -->
+          <div class="max-h-[320px] overflow-y-auto p-2">
+            <div v-if="filteredItems.length === 0" class="p-8 text-center text-[13px] text-gray-500 dark:text-gray-400">
+              <span>No results for "<em>{{ query }}</em>"</span>
+            </div>
             <div
-              v-for="(file, index) in filteredFiles"
-              :key="file.file_path"
-              class="result-item"
-              :class="{ active: index === selectedIndex }"
-              @click="selectFileByIndex(index)"
-              @mouseenter="selectedIndex = index"
+              v-for="(item, i) in filteredItems"
+              :key="item.id"
+              class="flex items-center gap-3 py-2.5 px-3 rounded-lg cursor-pointer transition-all duration-150"
+              :class="i === activeIndex ? 'bg-indigo-50 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'"
+              @click="select(item)"
+              @mouseenter="activeIndex = i"
             >
-              <FileCode2 
-                :size="16" 
-                :stroke-width="2" 
-                class="result-icon"
-              />
-              <div class="result-info">
-                <div class="result-filename">{{ getFileName(file.file_path) }}</div>
-                <div class="result-path">{{ file.file_path }}</div>
-              </div>
-              <div
-                class="result-badge"
-                :class="getBadgeClass(file)"
-              >
-                {{ getTotalIssues(file) }}
-              </div>
+              <span class="flex items-center shrink-0" :class="i === activeIndex ? 'text-indigo-500' : 'text-gray-400 dark:text-gray-500'" v-html="item.icon"></span>
+              <span class="flex-1 text-[14px] font-medium">{{ item.label }}</span>
+              <span class="text-[11px] font-medium" :class="i === activeIndex ? 'text-indigo-400/80' : 'text-gray-400 dark:text-gray-500'">{{ item.category }}</span>
             </div>
           </div>
-        </div>
 
-        <!-- Footer -->
-        <div class="palette-footer">
-          <div class="footer-hint">
-            <span class="footer-key">↑↓</span>
-            <span class="footer-text">Navigate</span>
-          </div>
-          <div class="footer-hint">
-            <span class="footer-key">⏎</span>
-            <span class="footer-text">Select</span>
-          </div>
-          <div class="footer-hint">
-            <span class="footer-key">Esc</span>
-            <span class="footer-text">Close</span>
+          <div class="flex items-center gap-5 py-2.5 px-5 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950/50 text-[11px] text-gray-400 dark:text-gray-500">
+            <span><kbd class="text-[10px] py-[1px] px-[5px] rounded-[3px] bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 mr-1">↑↓</kbd> Navigate</span>
+            <span><kbd class="text-[10px] py-[1px] px-[5px] rounded-[3px] bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 mr-1">↵</kbd> Select</span>
+            <span><kbd class="text-[10px] py-[1px] px-[5px] rounded-[3px] bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 mr-1">Esc</kbd> Close</span>
           </div>
         </div>
       </div>
-    </div>
-  </Transition>
+    </transition>
+  </teleport>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { 
-  Search, 
-  FileCode2, 
-  Loader2, 
-  AlertCircle,
-  FileSearch
-} from 'lucide-vue-next'
 import { filesAPI } from '../api.js'
 
 const router = useRouter()
-
-// State
 const isOpen = ref(false)
-const searchQuery = ref('')
-const files = ref([])
-const loading = ref(false)
-const error = ref(null)
-const selectedIndex = ref(0)
-const searchInput = ref(null)
+const query = ref('')
+const activeIndex = ref(0)
+const inputRef = ref(null)
+const filesList = ref([])
 
-// Computed
-const filteredFiles = computed(() => {
-  if (!searchQuery.value) return files.value.slice(0, 50) // Show first 50 if no query
-  
-  const query = searchQuery.value.toLowerCase()
-  return files.value
-    .filter(file => file.file_path.toLowerCase().includes(query))
-    .slice(0, 50) // Limit to 50 results for performance
-})
-
-// Methods
-const openModal = async () => {
-  isOpen.value = true
-  selectedIndex.value = 0
-  searchQuery.value = ''
-  
-  // Fetch files if not already loaded
-  if (files.value.length === 0) {
-    await fetchFiles()
-  }
-  
-  // Focus input after modal opens
-  await nextTick()
-  searchInput.value?.focus()
-}
-
-const closeModal = () => {
-  isOpen.value = false
-  searchQuery.value = ''
-  selectedIndex.value = 0
-}
+const staticItems = [
+  { id: 'home', label: 'Home', category: 'Navigation', route: '/', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>' },
+  { id: 'dashboard', label: 'Dashboard', category: 'Navigation', route: '/dashboard', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>' },
+  { id: 'audit', label: 'Audit Explorer', category: 'Navigation', route: '/audit', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>' },
+  { id: 'graph', label: 'Dependency Graph', category: 'Navigation', route: '/graph', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>' },
+]
 
 const fetchFiles = async () => {
-  loading.value = true
-  error.value = null
-  
   try {
-    const response = await filesAPI.getFiles()
-    files.value = response.data || []
-    console.log('Command Palette: Files loaded:', files.value.length)
+    const res = await filesAPI.getFiles()
+    if (res.data) {
+      filesList.value = res.data.map(f => ({
+        id: f.file_path,
+        label: f.file_path.split('/').pop(),
+        category: 'File',
+        route: `/audit?file=${encodeURIComponent(f.file_path)}`,
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>'
+      }))
+    }
   } catch (err) {
-    console.error('Command Palette: Error fetching files:', err)
-    error.value = 'Failed to load files'
-  } finally {
-    loading.value = false
+    console.error('Failed to load files for command palette', err)
   }
 }
 
-const navigateDown = () => {
-  if (selectedIndex.value < filteredFiles.value.length - 1) {
-    selectedIndex.value++
-    scrollToSelected()
-  }
-}
+const allItems = computed(() => [...staticItems, ...filesList.value])
 
-const navigateUp = () => {
-  if (selectedIndex.value > 0) {
-    selectedIndex.value--
-    scrollToSelected()
-  }
-}
-
-const scrollToSelected = () => {
-  // Scroll the selected item into view
-  nextTick(() => {
-    const selectedElement = document.querySelector('.result-item.active')
-    if (selectedElement) {
-      selectedElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    }
-  })
-}
-
-const selectFile = () => {
-  if (filteredFiles.value.length > 0 && selectedIndex.value >= 0) {
-    selectFileByIndex(selectedIndex.value)
-  }
-}
-
-const selectFileByIndex = (index) => {
-  const file = filteredFiles.value[index]
-  if (file) {
-    // Navigate to audit view with file query parameter
-    router.push({ 
-      path: '/audit', 
-      query: { file: file.file_path } 
-    })
-    closeModal()
-  }
-}
-
-const getFileName = (filePath) => {
-  if (!filePath) return ''
-  const parts = filePath.split('/')
-  return parts[parts.length - 1]
-}
-
-const getTotalIssues = (file) => {
-  return (file.eslint_flag_count || 0) + 
-         (file.accessibility_count || 0) + 
-         (file.ai_issue_count || 0)
-}
-
-const getBadgeClass = (file) => {
-  const totalIssues = getTotalIssues(file)
-  
-  if (totalIssues === 0) {
-    return 'badge-success'
-  } else if (totalIssues <= 5) {
-    return 'badge-low'
-  } else if (totalIssues <= 15) {
-    return 'badge-medium'
-  } else {
-    return 'badge-high'
-  }
-}
-
-// Keyboard event handler
-const handleKeydown = (event) => {
-  // Cmd+K (Mac) or Ctrl+K (Windows/Linux)
-  if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
-    event.preventDefault()
-    if (isOpen.value) {
-      closeModal()
-    } else {
-      openModal()
-    }
-  }
-  
-  // Escape key
-  if (event.key === 'Escape' && isOpen.value) {
-    event.preventDefault()
-    closeModal()
-  }
-}
-
-// Watch for search query changes to reset selected index
-watch(searchQuery, () => {
-  selectedIndex.value = 0
+const filteredItems = computed(() => {
+  if (!query.value) return staticItems
+  const q = query.value.toLowerCase()
+  return allItems.value.filter(i => i.label.toLowerCase().includes(q) || i.category.toLowerCase().includes(q) || (i.id && i.id.toLowerCase().includes(q))).slice(0, 15)
 })
 
-// Lifecycle
+watch(filteredItems, () => { activeIndex.value = 0 })
+
+const open = () => {
+  isOpen.value = true
+  query.value = ''
+  activeIndex.value = 0
+  nextTick(() => inputRef.value?.focus())
+}
+
+const close = () => {
+  isOpen.value = false
+  query.value = ''
+}
+
+const select = (item) => {
+  router.push(item.route)
+  close()
+}
+
+const selectCurrent = () => {
+  if (filteredItems.value[activeIndex.value]) {
+    select(filteredItems.value[activeIndex.value])
+  }
+}
+
+const moveDown = () => {
+  activeIndex.value = Math.min(activeIndex.value + 1, filteredItems.value.length - 1)
+}
+
+const moveUp = () => {
+  activeIndex.value = Math.max(activeIndex.value - 1, 0)
+}
+
+const onKeydown = (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault()
+    isOpen.value ? close() : open()
+  }
+}
+
 onMounted(() => {
-  // Add global keyboard listener
-  window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('keydown', onKeydown)
+  fetchFiles()
 })
-
-onUnmounted(() => {
-  // Remove global keyboard listener
-  window.removeEventListener('keydown', handleKeydown)
-})
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
-<style scoped>
-/* Backdrop */
-.command-palette-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.75);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 15vh;
-  z-index: 50;
-  overflow-y: auto;
-}
 
-/* Modal Container */
-.command-palette-modal {
-  width: 100%;
-  max-width: 600px;
-  background-color: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-lg);
-  box-shadow: var(--shadow-xl);
-  display: flex;
-  flex-direction: column;
-  max-height: 70vh;
-  margin: 0 16px;
-}
-
-/* Search Container */
-.search-container {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.search-icon {
-  color: var(--color-text-tertiary);
-  flex-shrink: 0;
-}
-
-.search-input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--color-text-primary);
-  font-size: var(--text-lg);
-  font-weight: 500;
-}
-
-.search-input::placeholder {
-  color: var(--color-text-tertiary);
-}
-
-/* Results Container */
-.results-container {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 200px;
-  max-height: 400px;
-}
-
-.results-loading,
-.results-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 24px;
-  text-align: center;
-}
-
-.results-list {
-  padding: 8px;
-}
-
-/* Result Item */
-.result-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: var(--rounded-base);
-  cursor: pointer;
-  transition: all 150ms ease-out;
-}
-
-.result-item:hover,
-.result-item.active {
-  background-color: var(--color-bg-tertiary);
-}
-
-.result-item.active {
-  border-left: 3px solid var(--color-accent-primary);
-  padding-left: 13px;
-}
-
-.result-icon {
-  color: var(--color-text-secondary);
-  flex-shrink: 0;
-}
-
-.result-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.result-filename {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.result-path {
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
-  font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-top: 2px;
-}
-
-.result-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: var(--rounded-full);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.badge-success {
-  background-color: var(--color-status-success);
-  color: #FFFFFF;
-}
-
-.badge-low {
-  background-color: var(--color-severity-low);
-  color: #FFFFFF;
-}
-
-.badge-medium {
-  background-color: var(--color-severity-medium);
-  color: #FFFFFF;
-}
-
-.badge-high {
-  background-color: var(--color-severity-high);
-  color: #FFFFFF;
-}
-
-/* Footer */
-.palette-footer {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 24px;
-  border-top: 1px solid var(--color-border);
-  background-color: var(--color-bg-primary);
-}
-
-.footer-hint {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.footer-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 24px;
-  height: 20px;
-  padding: 0 6px;
-  background-color: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-sm);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  font-family: var(--font-mono);
-}
-
-.footer-text {
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
-}
-
-/* Scrollbar styling */
-.results-container::-webkit-scrollbar {
-  width: 8px;
-}
-
-.results-container::-webkit-scrollbar-track {
-  background: var(--color-bg-primary);
-}
-
-.results-container::-webkit-scrollbar-thumb {
-  background: var(--color-bg-tertiary);
-  border-radius: var(--rounded-base);
-}
-
-.results-container::-webkit-scrollbar-thumb:hover {
-  background: var(--color-bg-hover);
-}
-
-/* Fade transition */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 150ms ease-out;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* Loading animation */
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-</style>

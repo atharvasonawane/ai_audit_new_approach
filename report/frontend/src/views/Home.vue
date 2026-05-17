@@ -1,66 +1,73 @@
 <template>
-  <div class="home-page fade-in">
-    <!-- Hero Header -->
-    <div class="home-hero">
-      <div class="hero-label">
-        <span class="hero-dot"></span>
+  <div class="flex flex-col gap-10 p-10 max-w-[1200px] mx-auto w-full">
+    <!-- Hero Section -->
+    <div class="flex flex-col gap-4">
+      <div class="inline-flex items-center gap-2 w-fit py-2 px-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[12px] font-semibold text-emerald-500">
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+          <circle cx="4" cy="4" r="4" fill="currentColor"/>
+        </svg>
         <span>Ready to analyze</span>
       </div>
-      <h1 class="hero-title">Code Audit<br><span class="hero-accent">Librarian</span></h1>
-      <p class="hero-sub">Vue.js codebase analysis — ESLint, accessibility, AI insights</p>
+      <h1 class="text-[48px] font-black tracking-[-0.03em] leading-[1.1] m-0 text-gray-900 dark:text-gray-50">
+        Code Audit<br><span class="bg-gradient-to-br from-blue-500 to-purple-400 bg-clip-text text-transparent">Librarian</span>
+      </h1>
+      <p class="text-[16px] font-normal leading-[1.6] m-0 max-w-[600px] text-gray-600 dark:text-gray-400">Enterprise-grade codebase analysis — AI insights, ESLint validation, accessibility compliance</p>
     </div>
 
-    <!-- Content Grid -->
-    <div class="home-grid">
-      <!-- Recent Audits -->
-      <div class="panel">
-        <div class="panel-header">
-          <span class="panel-title">Recent Audits</span>
-          <span class="panel-count">{{ recentAudits.length }}</span>
+    <!-- Main Content -->
+    <div class="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 flex-1 min-h-0">
+      <!-- Left Panel: Recent Audits -->
+      <div class="flex flex-col overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm rounded-xl transition-all duration-300 hover:border-gray-300 dark:hover:border-gray-700">
+        <div class="flex items-center justify-between py-5 px-6 border-b border-gray-100 dark:border-gray-800/50">
+          <h3 class="text-[14px] font-bold m-0 tracking-[-0.01em] text-gray-800 dark:text-gray-100">Recent Audits</h3>
+          <span class="font-mono text-[10px] py-0.5 px-2 bg-blue-500/10 border border-blue-500/20 rounded-md text-blue-600 dark:text-blue-400 font-bold">{{ recentAudits.length }}</span>
         </div>
 
-        <div v-if="loading" class="panel-loading">
-          <div class="skeleton" style="height:80px;margin-bottom:10px;"></div>
-          <div class="skeleton" style="height:80px;"></div>
+        <div v-if="loading" class="flex flex-col gap-2.5 p-4">
+          <div v-for="i in 3" :key="i" class="h-20 bg-gradient-to-r from-slate-400/10 to-slate-400/5 rounded-lg animate-pulse"></div>
         </div>
 
-        <div v-else-if="recentAudits.length === 0" class="panel-empty">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
-            <path d="M3 7V5a2 2 0 012-2h2M3 17v2a2 2 0 002 2h2M17 3h2a2 2 0 012 2v2M17 21h2a2 2 0 002-2v-2"/>
-            <rect x="7" y="7" width="10" height="10" rx="1"/>
+        <div v-else-if="recentAudits.length === 0" class="flex flex-col items-center justify-center gap-3 py-16 px-6 text-[13px] text-gray-500 dark:text-gray-400 flex-1">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="opacity-25">
+            <rect x="3" y="3" width="8" height="8" rx="1"/>
+            <rect x="13" y="3" width="8" height="8" rx="1"/>
+            <rect x="3" y="13" width="8" height="8" rx="1"/>
+            <rect x="13" y="13" width="8" height="8" rx="1"/>
           </svg>
-          <p>No audits yet. Start your first analysis.</p>
+          <p>No audits yet. Start analyzing!</p>
         </div>
 
-        <div v-else class="audit-list">
+        <div v-else class="flex flex-col gap-2 p-3 flex-1 overflow-y-auto">
           <div
             v-for="(audit, i) in recentAudits"
             :key="i"
-            class="audit-card"
+            class="p-4 bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-xl cursor-pointer transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-800/80"
             @click="navigateToDashboard"
           >
-            <div class="audit-top">
-              <span class="audit-name">{{ audit.project_name || 'Code Audit' }}</span>
-              <span class="audit-status-badge" :class="audit.status">
-                <span class="status-dot"></span>
+            <div class="flex items-center justify-between mb-2 gap-2">
+              <span class="text-[14px] font-bold tracking-[-0.01em] text-gray-900 dark:text-gray-100">{{ audit.project_name || 'Code Audit' }}</span>
+              <span class="inline-flex items-center gap-1 text-[10px] font-bold py-0.5 px-2 rounded-md tracking-[0.05em] uppercase shrink-0"
+                    :class="{
+                      'text-emerald-500 bg-emerald-500/10': audit.status === 'completed',
+                      'text-amber-500 bg-amber-500/10': audit.status === 'in_progress',
+                      'text-red-500 bg-red-500/10': audit.status === 'failed'
+                    }">
+                <span class="w-1 h-1 rounded-full bg-current"></span>
                 {{ getStatusText(audit.status) }}
               </span>
             </div>
-            <div class="audit-meta">
-              <span class="audit-time">{{ formatDate(audit.started_at) }}</span>
-            </div>
-            <div class="audit-stats">
-              <div class="audit-stat">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M4 2h5l4 4v8a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z"/>
-                  <path d="M9 2v4h4"/>
+            <div class="font-mono text-[11px] mb-2.5 text-gray-500 dark:text-gray-400">{{ formatDate(audit.started_at) }}</div>
+            <div class="flex gap-3">
+              <div class="flex items-center gap-1 text-[12px] text-gray-600 dark:text-gray-400">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-gray-400 dark:text-gray-500">
+                  <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
                 </svg>
                 <span>{{ audit.total_files || 0 }} files</span>
               </div>
-              <div class="audit-stat">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="8" cy="8" r="6"/>
-                  <path d="M8 5v3l2 1.5"/>
+              <div class="flex items-center gap-1 text-[12px] text-gray-600 dark:text-gray-400">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-gray-400 dark:text-gray-500">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M12 6v6l4 2"/>
                 </svg>
                 <span>{{ audit.total_issues || 0 }} issues</span>
               </div>
@@ -69,82 +76,94 @@
         </div>
       </div>
 
-      <!-- Quick Start -->
-      <div class="panel panel-wide">
-        <div class="panel-header">
-          <span class="panel-title">Quick Start</span>
+      <!-- Right Panel: Quick Start -->
+      <div class="flex flex-col overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm rounded-xl transition-all duration-300 hover:border-gray-300 dark:hover:border-gray-700">
+        <div class="flex items-center justify-between py-5 px-6 border-b border-gray-100 dark:border-gray-800/50">
+          <h3 class="text-[14px] font-bold m-0 tracking-[-0.01em] text-gray-800 dark:text-gray-100">Quick Start</h3>
         </div>
 
-        <div class="quickstart-content">
-          <label class="field-label">Project Directory Path</label>
-          <div class="input-wrapper">
-            <svg class="input-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M1 4a1 1 0 011-1h4l2 2h6a1 1 0 011 1v7a1 1 0 01-1 1H2a1 1 0 01-1-1V4z"/>
+        <div class="flex flex-col gap-4 p-6">
+          <label class="text-[11px] font-bold tracking-[0.05em] uppercase text-gray-600 dark:text-gray-400">Project Directory Path</label>
+          <div class="relative">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
             <input
               v-model="projectPath"
               type="text"
               placeholder="/path/to/your/vue-project"
-              class="path-input"
+              class="w-full py-2.5 pr-3.5 pl-9 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700/50 text-gray-900 dark:text-gray-100 rounded-lg text-[13px] font-mono outline-none transition-all duration-200 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-400/40 focus:bg-blue-500/10 focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 caret-gray-900 dark:caret-white"
               @keydown.enter="startAnalysis"
             />
           </div>
 
-          <div v-if="pathError" class="error-bar">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="8" cy="8" r="6"/><path d="M8 5v3M8 11h.01"/>
+          <div v-if="pathError" class="flex items-center gap-2 py-2.5 px-3 bg-red-500/10 border border-red-500/20 rounded-lg text-[12px] text-red-600 dark:text-red-400">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
             {{ pathError }}
           </div>
 
-          <div class="btn-row">
-            <button class="btn-secondary" @click="showBrowseHint">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M1 4a1 1 0 011-1h4l2 2h6a1 1 0 011 1v7a1 1 0 01-1 1H2a1 1 0 01-1-1V4z"/>
+          <div class="flex gap-3">
+            <!-- Hidden folder input -->
+            <input
+              ref="folderInput"
+              type="file"
+              webkitdirectory
+              directory
+              class="hidden"
+              @change="handleFolderSelect"
+            />
+            <button class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 hover:bg-gray-200 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-100" @click="folderInput.click()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
               </svg>
               Browse
             </button>
             <button
-              class="btn-primary"
-              :class="{ 'btn-disabled': !projectPath }"
+              class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white flex-1 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 shadow-[0_4px_12px_rgba(59,130,246,0.2)] hover:-translate-y-[1px] hover:shadow-[0_6px_20px_rgba(59,130,246,0.3)] disabled:bg-slate-500/20 disabled:bg-none disabled:text-slate-500 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
               :disabled="!projectPath"
               @click="startAnalysis"
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="8" cy="8" r="6"/><path d="M6 5l5 3-5 3V5z"/>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"/>
               </svg>
               Analyze Now
             </button>
           </div>
 
-          <div class="drop-zone">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+          <div class="flex flex-col items-center justify-center gap-2 py-8 px-6 border border-dashed border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 rounded-[10px] text-[13px] text-center">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-30">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
-            <span>Drag a folder here <span class="drop-soon">— coming soon</span></span>
+            <span>Drag a folder here <span class="text-[12px] text-gray-400 dark:text-gray-500">— coming soon</span></span>
           </div>
 
-          <!-- Tip cards -->
-          <div class="tips-row">
-            <div class="tip-card">
-              <div class="tip-icon tip-blue">AI</div>
+          <!-- Feature Cards -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-2">
+            <div class="flex items-center gap-2.5 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-lg transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center text-[11px] font-black tracking-[0.05em] bg-blue-500/15 border border-blue-500/20 text-blue-400 shrink-0">AI</div>
               <div>
-                <p class="tip-label">AI Analysis</p>
-                <p class="tip-desc">Deep code intelligence</p>
+                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5 m-0">AI Analysis</p>
+                <p class="text-[12px] text-gray-500 dark:text-gray-400 m-0">Deep code intelligence</p>
               </div>
             </div>
-            <div class="tip-card">
-              <div class="tip-icon tip-green">ES</div>
+            <div class="flex items-center gap-2.5 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-lg transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center text-[11px] font-black tracking-[0.05em] bg-emerald-500/15 border border-emerald-500/20 text-emerald-500 shrink-0">ES</div>
               <div>
-                <p class="tip-label">ESLint Scan</p>
-                <p class="tip-desc">Standards enforcement</p>
+                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5 m-0">ESLint Scan</p>
+                <p class="text-[12px] text-gray-500 dark:text-gray-400 m-0">Standards enforcement</p>
               </div>
             </div>
-            <div class="tip-card">
-              <div class="tip-icon tip-amber">A11</div>
+            <div class="flex items-center gap-2.5 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-lg transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center text-[11px] font-black tracking-[0.05em] bg-amber-500/15 border border-amber-500/20 text-amber-500 shrink-0">A11</div>
               <div>
-                <p class="tip-label">Accessibility</p>
-                <p class="tip-desc">WCAG compliance</p>
+                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5 m-0">Accessibility</p>
+                <p class="text-[12px] text-gray-500 dark:text-gray-400 m-0">WCAG compliance</p>
               </div>
             </div>
           </div>
@@ -163,6 +182,17 @@ const loading = ref(false)
 const recentAudits = ref([])
 const projectPath = ref('')
 const pathError = ref('')
+const folderInput = ref(null)
+
+const handleFolderSelect = (e) => {
+  const files = e.target.files
+  if (files && files.length > 0) {
+    // webkitRelativePath gives us 'folderName/file.ext' — grab root folder name
+    const rootFolder = files[0].webkitRelativePath.split('/')[0]
+    console.log('[Browse] Selected folder:', rootFolder)
+    projectPath.value = rootFolder
+  }
+}
 
 const mockRecentAudits = [
   { project_name: 'MyProject v1.0', started_at: '2024-01-15T14:32:00', status: 'completed', total_files: 42, total_issues: 128 },
@@ -188,7 +218,6 @@ const formatDate = (d) => {
 
 const getStatusText = (s) => ({ completed: 'Completed', in_progress: 'Running', failed: 'Failed' }[s] || 'Unknown')
 const navigateToDashboard = () => router.push('/dashboard')
-const showBrowseHint = () => alert('File browser integration coming soon! Please type the path manually.')
 const startAnalysis = () => {
   pathError.value = ''
   if (!projectPath.value) { pathError.value = 'Please enter a project directory path'; return }
@@ -197,368 +226,3 @@ const startAnalysis = () => {
 
 onMounted(fetchRecentAudits)
 </script>
-
-<style scoped>
-.home-page {
-  padding: 28px 32px;
-  max-width: 1100px;
-  margin: 0 auto;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-}
-
-.home-hero {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.hero-label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-  font-weight: 500;
-  letter-spacing: 0.04em;
-}
-
-.hero-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--color-status-success);
-  box-shadow: 0 0 6px var(--color-status-success);
-}
-
-.hero-title {
-  font-size: 42px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 1.1;
-  color: var(--color-text-primary);
-}
-
-.hero-accent {
-  background: linear-gradient(135deg, #388BFD, #8957E5);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.hero-sub {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  font-weight: 400;
-}
-
-/* Grid */
-.home-grid {
-  display: grid;
-  grid-template-columns: 340px 1fr;
-  gap: 16px;
-  flex: 1;
-  min-height: 0;
-}
-
-/* Panel */
-.panel {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-lg);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  letter-spacing: -0.01em;
-}
-
-.panel-count {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 2px 7px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border-emphasis);
-  border-radius: var(--rounded-full);
-  color: var(--color-text-secondary);
-}
-
-.panel-loading {
-  padding: 14px;
-}
-
-.panel-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 48px 24px;
-  color: var(--color-text-tertiary);
-  font-size: 13px;
-  text-align: center;
-  flex: 1;
-}
-
-/* Audit Cards */
-.audit-list {
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.audit-card {
-  padding: 12px 14px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-base);
-  cursor: pointer;
-  transition: all 150ms ease;
-}
-
-.audit-card:hover {
-  background: var(--color-bg-hover);
-  border-color: rgba(56, 139, 253, 0.35);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-}
-
-.audit-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.audit-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  letter-spacing: -0.01em;
-}
-
-.audit-status-badge {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: var(--rounded-full);
-}
-.audit-status-badge.completed { color: var(--color-status-success); background: rgba(63,185,80,0.1); }
-.audit-status-badge.in_progress { color: var(--color-status-warning); background: rgba(210,153,34,0.1); }
-.audit-status-badge.failed { color: var(--color-status-error); background: rgba(248,81,73,0.1); }
-
-.status-dot {
-  width: 5px; height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.audit-meta {
-  margin-bottom: 10px;
-}
-
-.audit-time {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-  font-family: var(--font-mono);
-}
-
-.audit-stats {
-  display: flex;
-  gap: 14px;
-}
-
-.audit-stat {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-/* Quick Start */
-.quickstart-content {
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.field-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.input-wrapper {
-  position: relative;
-}
-
-.input-icon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--color-text-tertiary);
-  pointer-events: none;
-}
-
-.path-input {
-  width: 100%;
-  padding: 10px 14px 10px 34px;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border-emphasis);
-  border-radius: var(--rounded-base);
-  color: var(--color-text-primary);
-  font-size: 13px;
-  font-family: var(--font-mono);
-  transition: all 150ms;
-  outline: none;
-}
-
-.path-input:focus {
-  border-color: var(--color-accent-primary);
-  box-shadow: 0 0 0 3px rgba(56,139,253,0.15);
-}
-
-.path-input::placeholder { color: var(--color-text-tertiary); }
-
-.error-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: rgba(248,81,73,0.08);
-  border: 1px solid rgba(248,81,73,0.3);
-  border-radius: var(--rounded-base);
-  color: var(--color-status-error);
-  font-size: 12px;
-}
-
-.btn-row {
-  display: flex;
-  gap: 10px;
-}
-
-.btn-primary, .btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 16px;
-  border-radius: var(--rounded-base);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 150ms;
-  border: 1px solid transparent;
-}
-
-.btn-primary {
-  background: var(--color-accent-primary);
-  color: white;
-  flex: 1;
-  justify-content: center;
-}
-.btn-primary:hover:not(.btn-disabled) {
-  background: var(--color-accent-hover);
-  box-shadow: 0 0 20px rgba(56,139,253,0.3);
-}
-.btn-primary.btn-disabled {
-  background: var(--color-bg-elevated);
-  color: var(--color-text-tertiary);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.btn-secondary {
-  background: var(--color-bg-tertiary);
-  border-color: var(--color-border-emphasis);
-  color: var(--color-text-secondary);
-}
-.btn-secondary:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-  border-color: rgba(56,139,253,0.3);
-}
-
-.drop-zone {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 24px;
-  border: 1px dashed var(--color-border-emphasis);
-  border-radius: var(--rounded-lg);
-  color: var(--color-text-tertiary);
-  font-size: 12px;
-}
-
-.drop-soon { color: var(--color-text-tertiary); opacity: 0.5; }
-
-.tips-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.tip-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-base);
-}
-
-.tip-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--rounded-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  flex-shrink: 0;
-}
-
-.tip-blue  { background: rgba(56,139,253,0.15); color: #58A6FF; }
-.tip-green { background: rgba(63,185,80,0.15);  color: #3FB950; }
-.tip-amber { background: rgba(210,153,34,0.15); color: #D29922; }
-
-.tip-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: 1px;
-}
-
-.tip-desc {
-  font-size: 10px;
-  color: var(--color-text-tertiary);
-}
-</style>

@@ -1,10 +1,14 @@
 <template>
-  <div class="app-layout">
+  <div class="h-screen w-screen flex font-sans antialiased min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-50 transition-colors duration-300">
     <Sidebar />
-    <div class="app-main">
+    <div class="app-main flex flex-col flex-1 min-w-0">
       <Navigation />
-      <main class="app-content">
-        <router-view />
+      <main class="app-content flex-1 overflow-y-auto pb-12 relative">
+        <router-view v-slot="{ Component }">
+          <transition name="page-fade" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
       </main>
     </div>
     <CommandPalette />
@@ -15,29 +19,10 @@
 import Sidebar from './components/Sidebar.vue'
 import Navigation from './components/Navigation.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import { useTheme } from './composables/useTheme'
+
+// Initialize theme on app load
+useTheme()
 </script>
 
-<style scoped>
-.app-layout {
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
-  display: flex;
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-}
 
-.app-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.app-content {
-  flex: 1;
-  overflow: hidden;
-  position: relative;
-}
-</style>

@@ -1,15 +1,19 @@
 <template>
-  <div class="dependency-graph-container">
+  <div class="flex flex-col h-full bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
     <!-- View Mode Toggle -->
-    <div class="view-toggle-bar">
-      <button class="vt-btn" :class="{ active: viewMode === 'graph' }" @click="viewMode = 'graph'">
+    <div class="flex gap-0.5 py-2 px-3.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shrink-0">
+      <button class="inline-flex items-center gap-1.5 py-1.5 px-3.5 rounded-md border text-[12px] font-semibold cursor-pointer transition-all duration-150"
+              :class="viewMode === 'graph' ? 'bg-indigo-50 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border-indigo-500/30' : 'border-transparent bg-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-50 hover:bg-gray-100 dark:hover:bg-gray-800'" 
+              @click="viewMode = 'graph'">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
           <circle cx="8" cy="8" r="2"/><circle cx="2" cy="2" r="1.5"/><circle cx="14" cy="14" r="1.5"/>
           <path d="M3.5 3.5l3 3M9.5 9.5l3 3"/>
         </svg>
         Graph
       </button>
-      <button class="vt-btn" :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">
+      <button class="inline-flex items-center gap-1.5 py-1.5 px-3.5 rounded-md border text-[12px] font-semibold cursor-pointer transition-all duration-150"
+              :class="viewMode === 'table' ? 'bg-indigo-50 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border-indigo-500/30' : 'border-transparent bg-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-50 hover:bg-gray-100 dark:hover:bg-gray-800'" 
+              @click="viewMode = 'table'">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
           <rect x="1" y="1" width="14" height="14" rx="1"/>
           <path d="M1 5h14M1 9h14M1 13h14M5 1v14"/>
@@ -19,35 +23,39 @@
     </div>
 
     <!-- Table View -->
-    <DependencyTable v-if="viewMode === 'table'" class="dep-table-fill" />
+    <DependencyTable v-if="viewMode === 'table'" class="flex-1 overflow-hidden" />
 
     <!-- Graph Controls (only in graph mode) -->
-    <div v-if="viewMode === 'graph'" class="graph-controls">
-      <input type="text" v-model="searchQuery" placeholder="Search files..." class="search-box" @input="highlightSearch" />
-      <div class="toggles">
-        <label><input type="checkbox" v-model="filters.component" /> Component</label>
-        <label><input type="checkbox" v-model="filters.composable" /> Composable</label>
-        <label><input type="checkbox" v-model="filters.store" /> Store</label>
-        <label><input type="checkbox" v-model="filters.service" /> Service</label>
-        <label><input type="checkbox" v-model="filters.router" /> Router</label>
-        <label><input type="checkbox" v-model="filters.utility" /> Utility</label>
+    <div v-show="viewMode === 'graph'" class="flex flex-wrap items-center justify-between gap-4 p-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
+      <input type="text" v-model="searchQuery" placeholder="Search files..." class="py-2 px-3 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 min-w-[250px] outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-300 dark:focus:border-gray-600 dark:focus:ring-gray-600 caret-gray-900 dark:caret-white" @input="highlightSearch" />
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="flex items-center gap-1 text-[12px] text-gray-600 dark:text-gray-400 cursor-pointer"><input type="checkbox" v-model="filters.component" class="accent-indigo-500" /> Component</label>
+        <label class="flex items-center gap-1 text-[12px] text-gray-600 dark:text-gray-400 cursor-pointer"><input type="checkbox" v-model="filters.composable" class="accent-indigo-500" /> Composable</label>
+        <label class="flex items-center gap-1 text-[12px] text-gray-600 dark:text-gray-400 cursor-pointer"><input type="checkbox" v-model="filters.store" class="accent-indigo-500" /> Store</label>
+        <label class="flex items-center gap-1 text-[12px] text-gray-600 dark:text-gray-400 cursor-pointer"><input type="checkbox" v-model="filters.service" class="accent-indigo-500" /> Service</label>
+        <label class="flex items-center gap-1 text-[12px] text-gray-600 dark:text-gray-400 cursor-pointer"><input type="checkbox" v-model="filters.router" class="accent-indigo-500" /> Router</label>
+        <label class="flex items-center gap-1 text-[12px] text-gray-600 dark:text-gray-400 cursor-pointer"><input type="checkbox" v-model="filters.utility" class="accent-indigo-500" /> Utility</label>
         
-        <button class="btn-toggle" :class="{active: showOrphansOnly}" @click="toggleOrphans">Show Orphans Only</button>
-        <button class="btn-toggle" :class="{active: showCyclesOnly}" @click="toggleCycles">Show Cycles Only</button>
+        <button class="py-1.5 px-3 rounded-full border text-[11px] font-semibold cursor-pointer transition-all duration-150"
+                :class="showOrphansOnly ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-transparent border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400'"
+                @click="toggleOrphans">Show Orphans Only</button>
+        <button class="py-1.5 px-3 rounded-full border text-[11px] font-semibold cursor-pointer transition-all duration-150"
+                :class="showCyclesOnly ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-transparent border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400'"
+                @click="toggleCycles">Show Cycles Only</button>
       </div>
     </div>
 
-    <div v-if="viewMode === 'graph'" class="graph-wrapper" ref="graphWrapper">
-      <svg ref="svgRef" class="d3-svg"></svg>
+    <div v-show="viewMode === 'graph'" class="flex-1 relative w-full h-[600px] border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden" ref="graphWrapper">
+      <svg ref="svgRef" class="w-full h-full block cursor-grab active:cursor-grabbing [&_.labels_text]:!fill-gray-900 dark:[&_.labels_text]:!fill-gray-100 [&_.nodes_circle]:!stroke-white dark:[&_.nodes_circle]:!stroke-gray-950"></svg>
       
       <!-- Tooltip -->
-      <div v-if="tooltip.visible && viewMode === 'graph'" class="d3-tooltip" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
-        <div class="tt-title">{{ tooltip.data.basename }}</div>
-        <div class="tt-cat" :style="{color: getNodeColor(tooltip.data)}">{{ tooltip.data.category }}</div>
-        <div class="tt-metrics">
-          <div>In: <strong>{{ tooltip.data.in_degree }}</strong></div>
-          <div>Out: <strong>{{ tooltip.data.out_degree }}</strong></div>
-          <div>Impact: <strong>{{ tooltip.data.impact_score }}</strong></div>
+      <div v-show="tooltip.visible && viewMode === 'graph'" class="absolute bg-white/95 dark:bg-gray-950/95 border border-gray-200 dark:border-gray-800 rounded-lg p-3 text-gray-900 dark:text-gray-100 pointer-events-none z-[100] shadow-[0_4px_12px_rgba(0,0,0,0.15)] min-w-[150px] backdrop-blur-sm" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
+        <div class="text-[13px] font-semibold text-gray-900 dark:text-gray-100 mb-1">{{ tooltip.data.basename }}</div>
+        <div class="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" :style="{color: getNodeColor(tooltip.data)}">{{ tooltip.data.category }}</div>
+        <div class="flex flex-col gap-0.5 text-[12px] text-gray-600 dark:text-gray-400">
+          <div>In: <strong class="text-gray-900 dark:text-gray-100">{{ tooltip.data.in_degree }}</strong></div>
+          <div>Out: <strong class="text-gray-900 dark:text-gray-100">{{ tooltip.data.out_degree }}</strong></div>
+          <div>Impact: <strong class="text-gray-900 dark:text-gray-100">{{ tooltip.data.impact_score }}</strong></div>
         </div>
       </div>
     </div>
@@ -357,155 +365,3 @@ const dragended = (event, d) => {
   d.fy = null
 }
 </script>
-
-<style scoped>
-.dependency-graph-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-lg);
-  overflow: hidden;
-}
-
-/* View toggle bar */
-.view-toggle-bar {
-  display: flex;
-  gap: 2px;
-  padding: 8px 14px;
-  background: var(--color-bg-secondary);
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.vt-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: var(--rounded-base);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 150ms;
-}
-.vt-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover, var(--color-bg-tertiary)); }
-.vt-btn.active {
-  background: rgba(56,139,253,0.15);
-  color: var(--color-accent-hover, #58A6FF);
-  border-color: rgba(56,139,253,0.25);
-}
-
-.dep-table-fill { flex: 1; overflow: hidden; }
-
-.graph-controls {
-  padding: 16px;
-  background: var(--color-bg-secondary);
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.search-box {
-  padding: 8px 12px;
-  border-radius: var(--rounded-base);
-  border: 1px solid var(--color-border-emphasis);
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  min-width: 250px;
-}
-
-.toggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-}
-
-.toggles label {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
-
-.btn-toggle {
-  padding: 6px 12px;
-  border-radius: var(--rounded-full);
-  border: 1px solid var(--color-border-emphasis);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 150ms;
-}
-
-.btn-toggle.active {
-  background: var(--color-accent-primary);
-  color: white;
-  border-color: var(--color-accent-primary);
-}
-
-.graph-wrapper {
-  flex: 1;
-  position: relative;
-  width: 100%;
-  height: 100%;
-  min-height: 600px;
-}
-
-.d3-svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-  cursor: grab;
-}
-.d3-svg:active { cursor: grabbing; }
-
-.d3-tooltip {
-  position: absolute;
-  background: rgba(13, 17, 23, 0.95);
-  border: 1px solid var(--color-border-emphasis);
-  border-radius: var(--rounded-base);
-  padding: 12px;
-  pointer-events: none;
-  z-index: 100;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-  min-width: 150px;
-}
-
-.tt-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: 4px;
-}
-
-.tt-cat {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 8px;
-}
-
-.tt-metrics {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.tt-metrics strong { color: var(--color-text-primary); }
-</style>

@@ -1,172 +1,196 @@
 <template>
-  <div class="flex flex-col items-center justify-center h-full px-6">
+  <div class="flex flex-col items-center justify-center min-h-screen h-full px-6 bg-gray-50 dark:bg-gray-950">
     <!-- Header -->
     <div class="text-center mb-12">
-      <h1 class="text-3xl font-bold text-text-primary mb-2">
+      <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-50 mb-2">
         Analyzing Project
       </h1>
-      <p class="text-text-secondary text-base font-mono">
+      <p class="text-gray-500 dark:text-gray-400 text-base font-mono">
         {{ projectPath || '/path/to/project' }}
       </p>
-      <p class="text-text-tertiary text-sm mt-2">
+      <p class="text-gray-400 dark:text-gray-500 text-sm mt-2">
         Elapsed time: {{ elapsedTime }}s
       </p>
     </div>
 
     <!-- Pipeline Progress Visual -->
-    <div class="pipeline-container">
-      <div class="pipeline-grid">
+    <div class="w-full max-w-[1000px] mb-12">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
         <!-- Phase 1: Scout -->
-        <div class="phase-card" :class="getPhaseClass(0)">
-          <div class="phase-title">SCOUT</div>
-          <div class="phase-icon">
+        <div class="bg-white dark:bg-gray-900 border rounded-xl p-6 flex flex-col items-center gap-3 transition-all duration-300 shadow-sm dark:shadow-none"
+             :class="{
+               'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500 dark:border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.2)]': currentPhase > 0,
+               'bg-amber-50 dark:bg-amber-500/10 border-amber-500 dark:border-amber-500/50 shadow-[0_0_12px_rgba(245,158,11,0.2)]': currentPhase === 0,
+               'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800': currentPhase < 0
+             }">
+          <div class="text-[14px] font-semibold text-gray-900 dark:text-gray-100 tracking-[0.05em] uppercase font-mono">SCOUT</div>
+          <div class="my-2">
             <CheckCircle2 
               v-if="currentPhase > 0"
               :size="32" 
               :stroke-width="2" 
-              class="text-status-success"
+              class="text-emerald-500"
             />
             <Loader2 
               v-else-if="currentPhase === 0"
               :size="32" 
               :stroke-width="2" 
-              class="animate-spin text-status-warning"
+              class="animate-spin text-amber-500"
             />
             <Circle 
               v-else
               :size="32" 
               :stroke-width="2" 
-              class="text-text-tertiary"
+              class="text-gray-300 dark:text-gray-600"
             />
           </div>
-          <div class="phase-status">{{ getPhaseStatus(0) }}</div>
+          <div class="text-[12px] font-medium text-gray-500 dark:text-gray-400">{{ getPhaseStatus(0) }}</div>
         </div>
 
         <!-- Phase 2: ESLint -->
-        <div class="phase-card" :class="getPhaseClass(1)">
-          <div class="phase-title">ESLINT</div>
-          <div class="phase-icon">
+        <div class="bg-white dark:bg-gray-900 border rounded-xl p-6 flex flex-col items-center gap-3 transition-all duration-300 shadow-sm dark:shadow-none"
+             :class="{
+               'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500 dark:border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.2)]': currentPhase > 1,
+               'bg-amber-50 dark:bg-amber-500/10 border-amber-500 dark:border-amber-500/50 shadow-[0_0_12px_rgba(245,158,11,0.2)]': currentPhase === 1,
+               'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800': currentPhase < 1
+             }">
+          <div class="text-[14px] font-semibold text-gray-900 dark:text-gray-100 tracking-[0.05em] uppercase font-mono">ESLINT</div>
+          <div class="my-2">
             <CheckCircle2 
               v-if="currentPhase > 1"
               :size="32" 
               :stroke-width="2" 
-              class="text-status-success"
+              class="text-emerald-500"
             />
             <Loader2 
               v-else-if="currentPhase === 1"
               :size="32" 
               :stroke-width="2" 
-              class="animate-spin text-status-warning"
+              class="animate-spin text-amber-500"
             />
             <Circle 
               v-else
               :size="32" 
               :stroke-width="2" 
-              class="text-text-tertiary"
+              class="text-gray-300 dark:text-gray-600"
             />
           </div>
-          <div class="phase-status">{{ getPhaseStatus(1) }}</div>
+          <div class="text-[12px] font-medium text-gray-500 dark:text-gray-400">{{ getPhaseStatus(1) }}</div>
         </div>
 
         <!-- Phase 3: AI Analysis -->
-        <div class="phase-card" :class="getPhaseClass(2)">
-          <div class="phase-title">AI ANALYSIS</div>
-          <div class="phase-icon">
+        <div class="bg-white dark:bg-gray-900 border rounded-xl p-6 flex flex-col items-center gap-3 transition-all duration-300 shadow-sm dark:shadow-none"
+             :class="{
+               'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500 dark:border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.2)]': currentPhase > 2,
+               'bg-amber-50 dark:bg-amber-500/10 border-amber-500 dark:border-amber-500/50 shadow-[0_0_12px_rgba(245,158,11,0.2)]': currentPhase === 2,
+               'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800': currentPhase < 2
+             }">
+          <div class="text-[14px] font-semibold text-gray-900 dark:text-gray-100 tracking-[0.05em] uppercase font-mono">AI ANALYSIS</div>
+          <div class="my-2">
             <CheckCircle2 
               v-if="currentPhase > 2"
               :size="32" 
               :stroke-width="2" 
-              class="text-status-success"
+              class="text-emerald-500"
             />
             <Loader2 
               v-else-if="currentPhase === 2"
               :size="32" 
               :stroke-width="2" 
-              class="animate-spin text-status-warning"
+              class="animate-spin text-amber-500"
             />
             <Circle 
               v-else
               :size="32" 
               :stroke-width="2" 
-              class="text-text-tertiary"
+              class="text-gray-300 dark:text-gray-600"
             />
           </div>
-          <div class="phase-status">{{ getPhaseStatus(2) }}</div>
+          <div class="text-[12px] font-medium text-gray-500 dark:text-gray-400">{{ getPhaseStatus(2) }}</div>
         </div>
 
         <!-- Phase 4: Synthesis -->
-        <div class="phase-card" :class="getPhaseClass(3)">
-          <div class="phase-title">SYNTHESIS</div>
-          <div class="phase-icon">
+        <div class="bg-white dark:bg-gray-900 border rounded-xl p-6 flex flex-col items-center gap-3 transition-all duration-300 shadow-sm dark:shadow-none"
+             :class="{
+               'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500 dark:border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.2)]': currentPhase > 3,
+               'bg-amber-50 dark:bg-amber-500/10 border-amber-500 dark:border-amber-500/50 shadow-[0_0_12px_rgba(245,158,11,0.2)]': currentPhase === 3,
+               'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800': currentPhase < 3
+             }">
+          <div class="text-[14px] font-semibold text-gray-900 dark:text-gray-100 tracking-[0.05em] uppercase font-mono">SYNTHESIS</div>
+          <div class="my-2">
             <CheckCircle2 
               v-if="currentPhase > 3"
               :size="32" 
               :stroke-width="2" 
-              class="text-status-success"
+              class="text-emerald-500"
             />
             <Loader2 
               v-else-if="currentPhase === 3"
               :size="32" 
               :stroke-width="2" 
-              class="animate-spin text-status-warning"
+              class="animate-spin text-amber-500"
             />
             <Circle 
               v-else
               :size="32" 
               :stroke-width="2" 
-              class="text-text-tertiary"
+              class="text-gray-300 dark:text-gray-600"
             />
           </div>
-          <div class="phase-status">{{ getPhaseStatus(3) }}</div>
+          <div class="text-[12px] font-medium text-gray-500 dark:text-gray-400">{{ getPhaseStatus(3) }}</div>
         </div>
       </div>
     </div>
 
     <!-- Progress Details Panel -->
-    <div class="progress-details-panel">
-      <div class="progress-header">
-        <div class="progress-label">
+    <div class="w-full max-w-[800px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm dark:shadow-none rounded-xl p-6 mb-8">
+      <div class="flex justify-between items-center mb-3">
+        <div class="text-[14px] text-gray-500 dark:text-gray-400 font-medium">
           Phase: {{ currentPhaseName }} ({{ currentPhase + 1 }} of 4)
         </div>
-        <div class="progress-percentage">
+        <div class="text-[14px] text-gray-900 dark:text-gray-100 font-semibold font-mono">
           {{ progressPercentage }}% complete
         </div>
       </div>
 
       <!-- Progress Bar -->
-      <div class="progress-bar-container">
+      <div class="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden mb-4">
         <div 
-          class="progress-bar-fill"
+          class="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500 ease-out rounded-full"
           :style="{ width: progressPercentage + '%' }"
         ></div>
       </div>
 
       <!-- Current File Info -->
-      <div class="current-file-info">
-        <FileCode2 :size="16" :stroke-width="2" class="text-accent-primary" />
-        <span class="text-text-secondary text-sm font-mono">
+      <div class="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg mb-5">
+        <FileCode2 :size="16" :stroke-width="2" class="text-blue-500" />
+        <span class="text-gray-600 dark:text-gray-400 text-sm font-mono">
           {{ currentFile }}
         </span>
       </div>
 
       <!-- Recent Findings -->
-      <div class="recent-findings">
-        <div class="findings-title">Recent Findings:</div>
-        <div class="findings-list">
+      <div class="mt-5">
+        <div class="text-[14px] font-semibold text-gray-900 dark:text-gray-100 mb-3">Recent Findings:</div>
+        <div class="flex flex-col gap-2">
           <div
             v-for="(finding, index) in recentFindings"
             :key="index"
-            class="finding-item"
+            class="flex items-center gap-3 py-2 px-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border-l-[3px] border-gray-200 dark:border-gray-700"
           >
             <div 
-              class="finding-severity"
-              :class="getSeverityClass(finding.severity)"
+              class="inline-flex items-center justify-center min-w-[60px] py-1 px-2 rounded-full text-[11px] font-semibold uppercase shrink-0 text-white"
+              :class="{
+                'bg-red-500': finding.severity === 'HIGH',
+                'bg-amber-500': finding.severity === 'MEDIUM',
+                'bg-emerald-500': finding.severity === 'LOW' || (finding.severity !== 'HIGH' && finding.severity !== 'MEDIUM')
+              }"
             >
               {{ finding.severity }}
             </div>
-            <div class="finding-text">
-              <span class="finding-file">{{ finding.file }}:</span>
-              <span class="finding-message">{{ finding.message }}</span>
+            <div class="flex-1 text-[14px] text-gray-500 dark:text-gray-400">
+              <span class="font-mono font-medium text-blue-500 dark:text-blue-400 mr-2">{{ finding.file }}:</span>
+              <span class="text-gray-900 dark:text-gray-100">{{ finding.message }}</span>
             </div>
           </div>
         </div>
@@ -174,8 +198,8 @@
     </div>
 
     <!-- Action Buttons -->
-    <div class="action-buttons">
-      <button class="cancel-button" @click="cancelAnalysis">
+    <div class="flex gap-3">
+      <button class="inline-flex items-center gap-2 py-2.5 px-5 bg-transparent border border-red-500 text-red-500 rounded-lg text-[14px] font-medium cursor-pointer transition-all duration-200 hover:bg-red-500/10 hover:border-red-600" @click="cancelAnalysis">
         <XCircle :size="16" :stroke-width="2" />
         <span>Cancel Analysis</span>
       </button>
@@ -220,16 +244,6 @@ const currentPhaseName = computed(() => {
 })
 
 // Methods
-const getPhaseClass = (phaseIndex) => {
-  if (currentPhase.value > phaseIndex) {
-    return 'phase-completed'
-  } else if (currentPhase.value === phaseIndex) {
-    return 'phase-in-progress'
-  } else {
-    return 'phase-pending'
-  }
-}
-
 const getPhaseStatus = (phaseIndex) => {
   if (currentPhase.value > phaseIndex) {
     return 'DONE'
@@ -237,15 +251,6 @@ const getPhaseStatus = (phaseIndex) => {
     return 'IN PROGRESS'
   } else {
     return 'PENDING'
-  }
-}
-
-const getSeverityClass = (severity) => {
-  switch (severity) {
-    case 'HIGH': return 'severity-high'
-    case 'MEDIUM': return 'severity-medium'
-    case 'LOW': return 'severity-low'
-    default: return 'severity-low'
   }
 }
 
@@ -316,255 +321,3 @@ onUnmounted(() => {
   if (elapsedInterval) clearInterval(elapsedInterval)
 })
 </script>
-
-<style scoped>
-/* Pipeline Container */
-.pipeline-container {
-  width: 100%;
-  max-width: 1000px;
-  margin-bottom: 48px;
-}
-
-.pipeline-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 24px;
-}
-
-@media (max-width: 768px) {
-  .pipeline-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-/* Phase Card */
-.phase-card {
-  background-color: var(--color-bg-secondary);
-  border: 2px solid var(--color-border);
-  border-radius: var(--rounded-base);
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  transition: all 400ms ease-out;
-}
-
-.phase-card.phase-completed {
-  background-color: rgba(16, 185, 129, 0.1);
-  border-color: var(--color-status-success);
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
-}
-
-.phase-card.phase-in-progress {
-  background-color: rgba(245, 158, 11, 0.1);
-  border-color: var(--color-status-warning);
-  animation: pulse 2s ease-in-out infinite;
-}
-
-.phase-card.phase-pending {
-  background-color: var(--color-bg-secondary);
-  border-color: var(--color-border);
-}
-
-@keyframes pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 rgba(245, 158, 11, 0);
-  }
-  50% {
-    box-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
-  }
-}
-
-.phase-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  font-family: var(--font-mono);
-}
-
-.phase-icon {
-  margin: 8px 0;
-}
-
-.phase-status {
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-  font-weight: 500;
-}
-
-/* Progress Details Panel */
-.progress-details-panel {
-  width: 100%;
-  max-width: 800px;
-  background-color: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-lg);
-  padding: 24px;
-  margin-bottom: 32px;
-}
-
-.progress-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.progress-label {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  font-weight: 500;
-}
-
-.progress-percentage {
-  font-size: var(--text-sm);
-  color: var(--color-text-primary);
-  font-weight: 600;
-  font-family: var(--font-mono);
-}
-
-/* Progress Bar */
-.progress-bar-container {
-  width: 100%;
-  height: 8px;
-  background-color: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-full);
-  overflow: hidden;
-  margin-bottom: 16px;
-}
-
-.progress-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--color-accent-primary), var(--color-accent-secondary));
-  transition: width 500ms ease-out;
-  border-radius: var(--rounded-full);
-}
-
-/* Current File Info */
-.current-file-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  background-color: var(--color-bg-primary);
-  border-radius: var(--rounded-base);
-  margin-bottom: 20px;
-}
-
-/* Recent Findings */
-.recent-findings {
-  margin-top: 20px;
-}
-
-.findings-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: 12px;
-}
-
-.findings-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.finding-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  background-color: var(--color-bg-primary);
-  border-radius: var(--rounded-base);
-  border-left: 3px solid var(--color-border);
-}
-
-.finding-severity {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 60px;
-  padding: 4px 8px;
-  border-radius: var(--rounded-full);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  flex-shrink: 0;
-}
-
-.severity-high {
-  background-color: var(--color-severity-high);
-  color: #FFFFFF;
-}
-
-.severity-medium {
-  background-color: var(--color-severity-medium);
-  color: #FFFFFF;
-}
-
-.severity-low {
-  background-color: var(--color-severity-low);
-  color: #FFFFFF;
-}
-
-.finding-text {
-  flex: 1;
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-}
-
-.finding-file {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  color: var(--color-accent-primary);
-  margin-right: 8px;
-}
-
-.finding-message {
-  color: var(--color-text-primary);
-}
-
-/* Action Buttons */
-.action-buttons {
-  display: flex;
-  gap: 12px;
-}
-
-.cancel-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  background-color: transparent;
-  border: 1px solid var(--color-severity-error);
-  border-radius: var(--rounded-base);
-  color: var(--color-severity-error);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 200ms ease-out;
-}
-
-.cancel-button:hover {
-  background-color: rgba(255, 94, 94, 0.1);
-  border-color: var(--color-severity-high);
-}
-
-/* Loading animation */
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-</style>

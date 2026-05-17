@@ -1,41 +1,46 @@
 <template>
-  <div class="code-snippet-container">
+  <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-[10px] overflow-hidden transition-all duration-200">
     <!-- Code Display -->
-    <div class="code-display">
+    <div class="flex flex-row overflow-x-auto font-mono text-[12px] leading-[1.6] bg-gray-50 dark:bg-gray-950">
       <!-- Line Numbers Column -->
-      <div class="line-numbers">
+      <div class="flex flex-col bg-gray-100 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 py-3 px-2 select-none shrink-0">
         <div
           v-for="(line, index) in parsedLines"
           :key="index"
-          class="line-number"
-          :class="{ highlighted: line.isTarget }"
+          class="text-right px-2 min-w-[40px] transition-all duration-200 text-[11px]"
+          :class="line.isTarget ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-500 dark:text-indigo-400 border-l-4 border-indigo-500 font-semibold -ml-1 pl-1' : 'text-gray-400 dark:text-gray-500 border-l-4 border-transparent'"
         >
           {{ line.lineNumber }}
         </div>
       </div>
 
       <!-- Code Content Column -->
-      <div class="code-content">
+      <div class="flex flex-col flex-1 p-3 overflow-x-auto">
         <div
           v-for="(line, index) in parsedLines"
           :key="index"
-          class="code-line"
-          :class="{ highlighted: line.isTarget }"
+          class="whitespace-pre transition-all duration-200 px-2 -mx-2"
+          :class="line.isTarget ? 'bg-indigo-50/50 dark:bg-indigo-900/20 border-l-4 border-indigo-500 text-gray-900 dark:text-white pl-1 font-medium' : 'text-gray-700 dark:text-gray-300 border-l-4 border-transparent'"
         >
-          <span class="code-text">{{ line.content }}</span>
+          <span class="inline-block tracking-[0.5px]">{{ line.content }}</span>
         </div>
       </div>
     </div>
 
     <!-- Action Footer -->
-    <div class="snippet-actions">
+    <div class="flex items-center justify-end py-2.5 px-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
       <button
         @click="copySnippet"
-        class="action-button"
-        :class="{ copied: isCopied }"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-transparent rounded-md text-[12px] font-medium cursor-pointer transition-all duration-200"
+        :class="isCopied ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' : 'border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'"
       >
-        <Check v-if="isCopied" :size="14" :stroke-width="2" />
-        <Copy v-else :size="14" :stroke-width="2" />
+        <svg v-if="isCopied" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+        </svg>
         <span>{{ isCopied ? 'Copied!' : 'Copy Snippet' }}</span>
       </button>
     </div>
@@ -44,7 +49,6 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { Copy, Check } from 'lucide-vue-next'
 
 const props = defineProps({
   code: {
@@ -116,135 +120,3 @@ const copySnippet = async () => {
   }
 }
 </script>
-
-<style scoped>
-.code-snippet-container {
-  background-color: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-base);
-  overflow: hidden;
-}
-
-.code-display {
-  display: flex;
-  flex-direction: row;
-  overflow-x: auto;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: var(--leading-relaxed);
-}
-
-/* Line Numbers Column */
-.line-numbers {
-  display: flex;
-  flex-direction: column;
-  background-color: var(--color-bg-tertiary);
-  padding: 12px 8px;
-  user-select: none;
-  flex-shrink: 0;
-  border-right: 1px solid var(--color-border);
-}
-
-.line-number {
-  text-align: right;
-  color: var(--color-text-tertiary);
-  padding: 0 8px;
-  min-width: 40px;
-  transition: all 200ms ease-out;
-}
-
-.line-number.highlighted {
-  background-color: rgba(59, 130, 246, 0.15);
-  color: var(--color-accent-primary);
-  font-weight: 600;
-  border-left: 3px solid var(--color-accent-primary);
-  margin-left: -3px;
-}
-
-/* Code Content Column */
-.code-content {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  padding: 12px;
-  overflow-x: auto;
-}
-
-.code-line {
-  color: var(--color-text-primary);
-  white-space: pre;
-  transition: all 200ms ease-out;
-  padding: 0 8px;
-  margin: 0 -8px;
-}
-
-.code-line.highlighted {
-  background-color: rgba(59, 130, 246, 0.1);
-  border-left: 3px solid var(--color-accent-primary);
-  padding-left: 5px;
-  font-weight: 500;
-}
-
-.code-text {
-  display: inline-block;
-}
-
-/* Action Footer */
-.snippet-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 8px 12px;
-  background-color: var(--color-bg-secondary);
-  border-top: 1px solid var(--color-border);
-}
-
-.action-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background-color: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--rounded-base);
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 200ms ease-out;
-}
-
-.action-button:hover {
-  background-color: var(--color-bg-tertiary);
-  border-color: var(--color-accent-primary);
-  color: var(--color-text-primary);
-}
-
-.action-button.copied {
-  background-color: rgba(16, 185, 129, 0.1);
-  border-color: var(--color-status-success);
-  color: var(--color-status-success);
-}
-
-/* Scrollbar styling for code content */
-.code-display::-webkit-scrollbar,
-.code-content::-webkit-scrollbar {
-  height: 8px;
-}
-
-.code-display::-webkit-scrollbar-track,
-.code-content::-webkit-scrollbar-track {
-  background: var(--color-bg-primary);
-}
-
-.code-display::-webkit-scrollbar-thumb,
-.code-content::-webkit-scrollbar-thumb {
-  background: var(--color-bg-tertiary);
-  border-radius: var(--rounded-base);
-}
-
-.code-display::-webkit-scrollbar-thumb:hover,
-.code-content::-webkit-scrollbar-thumb:hover {
-  background: var(--color-bg-hover);
-}
-</style>

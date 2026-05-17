@@ -1,87 +1,98 @@
 <template>
-  <div class="explorer">
-    <!-- Left: File List -->
-    <div class="file-pane">
-      <div class="file-pane-header">
-        <div class="search-wrap">
-          <svg class="search-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="6.5" cy="6.5" r="5"/><path d="M10.5 10.5L14 14"/>
+  <div class="flex h-full overflow-hidden explorer">
+    <!-- Left: File Pane -->
+    <div class="bg-gray-50 dark:bg-gray-900 flex flex-col overflow-hidden" :style="{ width: paneWidth + 'px', minWidth: paneWidth + 'px' }">
+      <!-- Header with Search -->
+      <div class="flex items-center gap-2.5 p-3 border-b border-gray-200 dark:border-gray-800 shrink-0">
+        <div class="relative flex-1">
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none opacity-80" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.35-4.35"/>
           </svg>
           <input
             v-model="searchQuery"
             type="text"
             placeholder="Search files..."
-            class="search-input"
+            class="w-full py-2 pr-3 pl-8 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-[13px] outline-none transition-all duration-200 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-400/40 focus:bg-blue-500/10 focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 caret-gray-900 dark:caret-white"
           />
         </div>
-        <div class="file-count-badge">
+        <div class="font-mono text-[11px] py-1 px-2 bg-slate-500/15 border border-slate-400/10 rounded-md text-gray-600 dark:text-gray-400 shrink-0 font-semibold">
           {{ filteredFiles.length }}
         </div>
       </div>
 
-      <div class="file-list">
+      <!-- Files List -->
+      <div class="flex-1 overflow-y-auto p-2 flex flex-col">
         <!-- Loading -->
-        <div v-if="loading" class="file-list-loading">
-          <div v-for="i in 8" :key="i" class="skeleton" :style="`height:40px;margin-bottom:4px;opacity:${1-i*0.1}`"></div>
+        <div v-if="loading" class="p-2 flex flex-col gap-1.5">
+          <div v-for="i in 6" :key="i" class="h-9 bg-gradient-to-r from-slate-400/10 to-slate-400/5 rounded-lg animate-pulse"></div>
         </div>
 
         <!-- Error -->
-        <div v-else-if="error" class="file-list-error">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-            <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+        <div v-else-if="error" class="flex flex-col items-center justify-center gap-3 py-10 px-5 text-center text-gray-500 dark:text-gray-400 flex-1">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-40">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
-          <p>{{ error }}</p>
-          <button class="retry-btn" @click="fetchFiles">Retry</button>
+          <p class="text-[12px] leading-relaxed">{{ error }}</p>
+          <button class="px-3.5 py-1.5 bg-blue-500/15 text-blue-400 border border-blue-500/30 rounded-md text-[12px] font-semibold transition-all duration-200 mt-2 hover:bg-blue-500/25 hover:border-blue-500/50" @click="fetchFiles">Retry</button>
         </div>
 
         <!-- Files -->
-        <div v-else-if="filteredFiles.length > 0">
+        <div v-else-if="filteredFiles.length > 0" class="flex flex-col gap-1">
           <div
             v-for="(file, i) in filteredFiles"
             :key="i"
-            class="file-row"
-            :class="{ active: selectedFile?.file_path === file.file_path }"
+            class="group flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-all duration-200 gap-2 border-l-2 border-transparent bg-transparent hover:bg-slate-400/10 hover:border-blue-500/20"
+            :class="{ 'bg-indigo-50 dark:bg-indigo-500/20 border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/20': selectedFile?.file_path === file.file_path }"
             @click="selectFile(file)"
           >
-            <div class="file-row-left">
-              <svg class="file-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M4 2h5l4 4v8a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z"/>
-                <path d="M9 2v4h4"/>
-                <path d="M6 9h4M6 12h2"/>
+            <div class="flex items-center gap-2.5 min-w-0 flex-1">
+              <svg class="shrink-0 opacity-80 transition-colors duration-200" :class="selectedFile?.file_path === file.file_path ? 'text-blue-400' : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+                <polyline points="13 2 13 9 20 9"/>
               </svg>
-              <span class="file-name">{{ getFileName(file.file_path) }}</span>
+              <span class="font-mono text-[12px] whitespace-nowrap overflow-hidden text-ellipsis transition-colors duration-200" :class="selectedFile?.file_path === file.file_path ? 'text-indigo-700 dark:text-indigo-300 font-medium' : 'text-gray-900 dark:text-gray-100'">{{ getFileName(file.file_path) }}</span>
             </div>
-            <div
-              class="issue-badge"
-              :class="getIssueBadgeClass(file)"
-            >
+            <div class="font-mono text-[10px] font-bold py-0.5 px-1.5 rounded-md shrink-0 transition-all duration-200" 
+                 :class="{
+                   'bg-emerald-500/10 text-emerald-500': getIssueBadgeClass(file) === 'badge-zero' || getIssueBadgeClass(file) === 'badge-low',
+                   'bg-amber-500/10 text-amber-500': getIssueBadgeClass(file) === 'badge-med',
+                   'bg-red-500/10 text-red-500': getIssueBadgeClass(file) === 'badge-high'
+                 }">
               {{ getTotalIssues(file) }}
             </div>
           </div>
         </div>
 
         <!-- Empty -->
-        <div v-else class="file-list-empty">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.2">
-            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+        <div v-else class="flex flex-col items-center justify-center gap-3 py-10 px-5 text-center text-gray-500 dark:text-gray-400 flex-1">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="opacity-20">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
-          <p>No files found</p>
+          <p class="text-[12px]">No files found</p>
         </div>
       </div>
     </div>
 
-    <!-- Right: Detail -->
-    <div class="detail-pane">
+    <!-- Resizer -->
+    <div class="w-1 cursor-col-resize bg-gray-200 dark:bg-white/10 hover:bg-gray-300 dark:hover:bg-gray-600 active:bg-gray-400 dark:active:bg-gray-500 transition-colors shrink-0 z-10" @mousedown="startDrag"></div>
+
+    <!-- Right: Detail Pane -->
+    <div class="flex-1 overflow-hidden bg-white dark:bg-gray-950">
       <FileDetailView v-if="selectedFilePath" :filePath="selectedFilePath" />
-      <div v-else class="detail-empty">
-        <div class="detail-empty-icon">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-            <path d="M11 7v4M11 15h.01"/>
+      <div v-else class="h-full flex flex-col items-center justify-center gap-5 p-10 text-center">
+        <div class="flex flex-col items-center gap-4">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="text-gray-400 dark:text-gray-600">
+            <circle cx="11" cy="11" r="8" class="opacity-30"/>
+            <path d="M21 21l-4.35-4.35" class="opacity-30"/>
+            <circle cx="11" cy="11" r="8" class="opacity-15"/>
+            <path d="M11 8v6M11 17h.01" class="opacity-30"/>
           </svg>
+          <h3 class="text-base font-bold text-gray-900 dark:text-gray-100 m-0">Select a file</h3>
+          <p class="text-[13px] text-gray-500 dark:text-gray-400 max-w-[320px] leading-relaxed m-0">Choose a file from the left panel to view its audit details and code issues.</p>
         </div>
-        <h3>Select a file</h3>
-        <p>Choose a file from the left panel to view its audit details, issues, and code snippets.</p>
       </div>
     </div>
   </div>
@@ -92,14 +103,47 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { filesAPI } from '../api.js'
 import FileDetailView from '../components/FileDetailView.vue'
+import { useSearch } from '../composables/useSearch'
 
 const route = useRoute()
+const { searchQuery } = useSearch()
 const files = ref([])
 const loading = ref(false)
 const error = ref(null)
-const searchQuery = ref('')
 const selectedFile = ref(null)
 const selectedFilePath = ref(null)
+
+const paneWidth = ref(280)
+const isDragging = ref(false)
+
+const startDrag = () => {
+  isDragging.value = true
+  document.addEventListener('mousemove', onDrag)
+  document.addEventListener('mouseup', stopDrag)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+const onDrag = (e) => {
+  if (isDragging.value) {
+    const container = document.querySelector('.explorer')
+    if (container) {
+      const rect = container.getBoundingClientRect()
+      let newWidth = e.clientX - rect.left
+      if (newWidth < 200) newWidth = 200
+      if (newWidth > 600) newWidth = 600
+      paneWidth.value = newWidth
+    }
+  }
+}
+
+const stopDrag = () => {
+  isDragging.value = false
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', stopDrag)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
 
 const filteredFiles = computed(() => {
   if (!searchQuery.value) return files.value
@@ -148,203 +192,3 @@ watch(files, (arr) => {
   }
 })
 </script>
-
-<style scoped>
-.explorer {
-  display: flex;
-  height: 100%;
-  overflow: hidden;
-}
-
-/* File Pane */
-.file-pane {
-  width: 260px;
-  min-width: 260px;
-  background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.file-pane-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.search-wrap {
-  position: relative;
-  flex: 1;
-}
-
-.search-icon {
-  position: absolute;
-  left: 9px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--color-text-tertiary);
-  pointer-events: none;
-}
-
-.search-input {
-  width: 100%;
-  padding: 7px 10px 7px 28px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border-emphasis);
-  border-radius: var(--rounded-base);
-  color: var(--color-text-primary);
-  font-size: 12px;
-  outline: none;
-  transition: all 150ms;
-}
-
-.search-input:focus {
-  border-color: var(--color-accent-primary);
-  box-shadow: 0 0 0 2px rgba(56,139,253,0.15);
-}
-
-.search-input::placeholder { color: var(--color-text-tertiary); }
-
-.file-count-badge {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  padding: 2px 6px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border-emphasis);
-  border-radius: var(--rounded-full);
-  color: var(--color-text-tertiary);
-  flex-shrink: 0;
-}
-
-.file-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px;
-}
-
-.file-list-loading { padding: 8px; }
-
-.file-list-error, .file-list-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 40px 16px;
-  text-align: center;
-  color: var(--color-text-tertiary);
-  font-size: 12px;
-}
-
-.retry-btn {
-  padding: 5px 12px;
-  background: var(--color-accent-primary);
-  color: white;
-  border-radius: var(--rounded-base);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 150ms;
-}
-
-.file-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 7px 8px;
-  border-radius: var(--rounded-base);
-  cursor: pointer;
-  transition: background 120ms;
-  gap: 6px;
-  border-left: 2px solid transparent;
-}
-
-.file-row:hover { background: var(--color-bg-hover); }
-
-.file-row.active {
-  background: rgba(56,139,253,0.08);
-  border-left-color: var(--color-accent-primary);
-}
-
-.file-row-left {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  flex: 1;
-}
-
-.file-icon { color: var(--color-text-tertiary); flex-shrink: 0; }
-.file-row.active .file-icon { color: var(--color-accent-hover); }
-
-.file-name {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.file-row.active .file-name { color: var(--color-text-primary); }
-
-.issue-badge {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: var(--rounded-full);
-  flex-shrink: 0;
-}
-
-.badge-zero { background: rgba(63,185,80,0.1);  color: var(--color-status-success); }
-.badge-low  { background: rgba(63,185,80,0.1);  color: var(--color-status-success); }
-.badge-med  { background: rgba(210,153,34,0.12); color: var(--color-status-warning); }
-.badge-high { background: rgba(248,81,73,0.1);  color: var(--color-status-error); }
-
-/* Detail Pane */
-.detail-pane {
-  flex: 1;
-  overflow: hidden;
-  background: var(--color-bg-primary);
-}
-
-.detail-empty {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 40px;
-  text-align: center;
-}
-
-.detail-empty-icon {
-  width: 64px; height: 64px;
-  border-radius: 50%;
-  background: var(--color-bg-tertiary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-tertiary);
-  margin-bottom: 4px;
-}
-
-.detail-empty h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.detail-empty p {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  max-width: 300px;
-  line-height: 1.6;
-}
-</style>
