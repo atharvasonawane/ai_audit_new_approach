@@ -42,6 +42,23 @@
         <button class="py-1.5 px-3 rounded-full border text-[11px] font-semibold cursor-pointer transition-all duration-150"
                 :class="showCyclesOnly ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-transparent border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400'"
                 @click="toggleCycles">Show Cycles Only</button>
+
+        <!-- Stage 11: Heatmap Mode -->
+        <button
+          class="flex items-center gap-1.5 py-1.5 px-3 rounded-full border text-[11px] font-semibold cursor-pointer transition-all duration-200"
+          :class="heatmapActive
+            ? 'bg-gradient-to-r from-green-500 via-yellow-400 to-red-500 text-white border-transparent shadow-md'
+            : 'bg-transparent border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400'"
+          @click="toggleHeatmap"
+          title="Color nodes by impact score — green (safe) to red (bottleneck)"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <circle cx="4" cy="8" r="3" fill="#22c55e"/>
+            <circle cx="8" cy="8" r="3" fill="#eab308"/>
+            <circle cx="12" cy="8" r="3" fill="#ef4444"/>
+          </svg>
+          Heatmap
+        </button>
       </div>
     </div>
 
@@ -78,7 +95,38 @@
 
       <!-- Graph Wrapper -->
       <div class="flex-1 relative w-full h-full overflow-hidden" ref="graphWrapper">
+        
+        <!-- Topology Stats Bar -->
+        <div v-show="viewMode === 'graph' && layoutMode === 'force'" class="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border border-gray-200 dark:border-gray-700 rounded-full shadow-sm px-3 py-1.5 text-[11px] font-semibold text-gray-700 dark:text-gray-300 transition-all">
+          <span class="px-2 border-r border-gray-300 dark:border-gray-600">Total: {{ topologyStats.total }}</span>
+          
+          <button @click.stop="toggleTopologyFilter('entryPoints')" 
+                  class="px-2 py-0.5 transition-colors rounded-full font-bold" 
+                  :class="activeTopologyFilter === 'entryPoints' ? 'bg-indigo-600 text-white dark:bg-indigo-500' : 'hover:text-indigo-600 dark:hover:text-indigo-400'">
+            Entry Points: {{ topologyStats.entryPoints }}
+          </button>
+          
+          <button @click.stop="toggleTopologyFilter('hubs')" 
+                  class="px-2 py-0.5 border-l border-gray-300 dark:border-gray-600 transition-colors rounded-full font-bold" 
+                  :class="activeTopologyFilter === 'hubs' ? 'bg-orange-600 text-white dark:bg-orange-500 border-l-transparent' : 'hover:text-orange-600 dark:hover:text-orange-400'">
+            Hubs: {{ topologyStats.hubs }}
+          </button>
+          
+          <button @click.stop="toggleTopologyFilter('leaves')" 
+                  class="px-2 py-0.5 border-l border-gray-300 dark:border-gray-600 transition-colors rounded-full font-bold" 
+                  :class="activeTopologyFilter === 'leaves' ? 'bg-teal-600 text-white dark:bg-teal-500 border-l-transparent' : 'hover:text-teal-600 dark:hover:text-teal-400'">
+            Leaves: {{ topologyStats.leaves }}
+          </button>
+          
+          <button @click.stop="toggleTopologyFilter('orphans')" 
+                  class="px-2 py-0.5 border-l border-gray-300 dark:border-gray-600 transition-colors rounded-full font-bold" 
+                  :class="activeTopologyFilter === 'orphans' ? 'bg-yellow-500 text-white dark:bg-yellow-500 border-l-transparent' : 'hover:text-yellow-600 dark:hover:text-yellow-400'">
+            Orphans: {{ topologyStats.orphans }}
+          </button>
+        </div>
+
         <svg ref="svgRef" class="w-full h-full block cursor-grab active:cursor-grabbing [&_.labels_text]:!fill-gray-900 dark:[&_.labels_text]:!fill-gray-100 [&_.labels_text]:![text-shadow:0_1px_3px_rgba(255,255,255,0.9)] dark:[&_.labels_text]:![text-shadow:0_1px_3px_rgba(0,0,0,0.9)]"></svg>
+
       
       <!-- Tooltip -->
       <div v-show="tooltip.visible && viewMode === 'graph'" class="fixed bg-white/95 dark:bg-gray-950/95 border border-gray-200 dark:border-gray-800 rounded-lg p-3 text-gray-900 dark:text-gray-100 pointer-events-none z-[100] shadow-[0_4px_12px_rgba(0,0,0,0.15)] min-w-[150px] backdrop-blur-sm" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
@@ -205,6 +253,35 @@ let nodeElements = null
 let zoom = null
 let labelElements = null
 let pinnedNode = null
+let blastRadiusNode = null
+let impactBadge = null
+
+const heatmapActive = ref(false)
+const activeTopologyFilter = ref(null)
+
+const topologyStats = computed(() => {
+  const nodes = reactiveNodes.value
+  let entryPoints = 0
+  let hubs = 0
+  let leaves = 0
+  let orphans = 0
+
+  nodes.forEach(n => {
+    const isEntry = n.id.endsWith('App.vue') || n.id.endsWith('main.js') || n.id.includes('/router/')
+    if (isEntry) entryPoints++
+    if (n.in_degree >= 3 && n.out_degree >= 3) hubs++
+    if (n.out_degree === 0) leaves++
+    if (n.in_degree === 0 && !isEntry) orphans++
+  })
+
+  return {
+    total: nodes.length,
+    entryPoints,
+    hubs,
+    leaves,
+    orphans
+  }
+})
 
 let minimapSvg = null
 let minimapNodes = null
@@ -303,6 +380,7 @@ const initGraph = () => {
       if (layoutMode.value === 'radial') exitFocusedMode()
       else {
         pinnedNode = null
+        blastRadiusNode = null
         resetHighlight()
       }
     })
@@ -344,6 +422,7 @@ const initGraph = () => {
   g.append('g').attr('class', 'links')
   g.append('g').attr('class', 'nodes')
   g.append('g').attr('class', 'labels')
+  g.append('g').attr('class', 'impact-badges')
 
   zoom = d3.zoom()
     .scaleExtent([0.1, 4])
@@ -362,15 +441,245 @@ const initGraph = () => {
   updateGraph()
 }
 
+// ─── Blast Radius Reset ───────────────────────────────────────────────────
+// Uses g.select() for live DOM queries — immune to stale cached references.
 const resetHighlight = () => {
-  if (layoutMode.value === 'radial' || !nodeElements || !linkElements || !labelElements) return
-  nodeElements.attr('opacity', n => n.category === 'orphan' ? 0.5 : 1)
-  linkElements.attr('opacity', 0.6).attr('stroke-width', 1.5)
-  labelElements.style('opacity', n => nodeRadius(n) < 8 ? 0 : 1)
+  if (!g) return
+
+  // Clear state
+  blastRadiusNode = null
+  activeTopologyFilter.value = null
+  g.select('.impact-badges').selectAll('*').remove()
+  impactBadge = null
+
+  if (heatmapActive.value) {
+    applyHeatmap()
+    return
+  }
+
+  // Re-query live DOM so this always works regardless of when called
+  const liveNodes = g.select('.nodes').selectAll('circle')
+  const liveLinks = g.select('.links').selectAll('path')
+  const liveLabels = g.select('.labels').selectAll('text')
+
+  liveNodes
+    .transition().duration(300)
+    .attr('opacity', function() {
+      const d = d3.select(this).datum()
+      return (d && d.category === 'orphan') ? 0.5 : 1
+    })
+    .attr('fill', function() {
+      const d = d3.select(this).datum()
+      if (!d) return '#3b82f6'
+      return d.category === 'missing' ? 'url(#missing-pattern)' : getNodeColor(d)
+    })
+    .attr('stroke', function() {
+      const d = d3.select(this).datum()
+      if (!d) return '#000'
+      if (d.is_in_cycle) return '#dc2626'
+      if (d.category === 'entry_point') return '#facc15'
+      const c = d3.color(getNodeColor(d))
+      return c ? c.darker(1).formatHex() : '#000'
+    })
+    .attr('stroke-width', function() {
+      const d = d3.select(this).datum()
+      if (!d) return 2
+      return (d.is_in_cycle || d.category === 'entry_point') ? 3 : 2
+    })
+
+  // Filter (glow) must be set without transition to avoid stacking
+  liveNodes.style('filter', function() {
+    const d = d3.select(this).datum()
+    if (!d) return 'none'
+    return (d.category === 'shared_utility' || d.in_degree >= 5)
+      ? `drop-shadow(0 0 6px ${getNodeColor(d)})`
+      : 'none'
+  })
+
+  liveLinks
+    .transition().duration(300)
+    .attr('opacity', 0.6)
+    .attr('stroke-width', 1.5)
+    .attr('stroke', function() {
+      const d = d3.select(this).datum()
+      return d ? getEdgeColor(d.relationship_type) : '#94a3b8'
+    })
+
+  liveLabels
+    .transition().duration(300)
+    .style('opacity', function() {
+      const d = d3.select(this).datum()
+      return (d && nodeRadius(d) < 8) ? 0 : 1
+    })
+
+  // Keep cached references in sync
+  nodeElements  = liveNodes
+  linkElements  = liveLinks
+  labelElements = liveLabels
 }
+
+// ─── Stage 10 REMOVED (Path Finder cut from scope) ───────────────────────
+
+// ─── Stage 11: Heatmap Mode ───────────────────────────────────────────────
+// Scores nodes by impact_score (or total degree as fallback).
+// Uses d3.scaleSequential + interpolateRdYlGn reversed:
+//   low  score → green  (healthy, low risk)
+//   mid  score → yellow (moderate coupling)
+//   high score → red    (bottleneck / danger)
+const applyHeatmap = () => {
+  if (!g) return
+
+  // Build heat score for every visible node
+  const scores = graphNodes.map(d => {
+    const impact = d.impact_score || 0
+    const degree = (d.in_degree || 0) + (d.out_degree || 0)
+    return impact > 0 ? impact : degree
+  })
+  const maxScore = Math.max(...scores, 1)
+
+  // Domain: [0, max] mapped to RdYlGn reversed (0 = green, max = red)
+  const heatScale = d3.scaleSequential(d3.interpolateRdYlGn)
+    .domain([maxScore, 0]) // reversed so high → red
+
+  const liveNodes  = g.select('.nodes').selectAll('circle')
+  const liveLabels = g.select('.labels').selectAll('text')
+  const liveLinks  = g.select('.links').selectAll('path')
+
+  liveNodes
+    .transition().duration(500)
+    .attr('fill', function() {
+      const d = d3.select(this).datum()
+      if (!d) return '#3b82f6'
+      const score = (d.impact_score || 0) > 0
+        ? d.impact_score
+        : (d.in_degree || 0) + (d.out_degree || 0)
+      return heatScale(score)
+    })
+    .attr('stroke', function() {
+      const d = d3.select(this).datum()
+      if (!d) return '#000'
+      const score = (d.impact_score || 0) > 0
+        ? d.impact_score
+        : (d.in_degree || 0) + (d.out_degree || 0)
+      const c = d3.color(heatScale(score))
+      return c ? c.darker(0.8).formatHex() : '#000'
+    })
+    .attr('opacity', 1)
+    .attr('stroke-width', 2)
+
+  // Glow the hottest nodes (top 20%)
+  const threshold = maxScore * 0.8
+  liveNodes.style('filter', function() {
+    const d = d3.select(this).datum()
+    if (!d) return 'none'
+    const score = (d.impact_score || 0) > 0
+      ? d.impact_score
+      : (d.in_degree || 0) + (d.out_degree || 0)
+    if (score >= threshold) {
+      const heat = heatScale(score)
+      return `drop-shadow(0 0 8px ${heat})`
+    }
+    return 'none'
+  })
+
+  // Dim links slightly so nodes are the focal point
+  liveLinks
+    .transition().duration(500)
+    .attr('opacity', 0.25)
+    .attr('stroke-width', 1)
+
+  // Show all labels in heatmap mode so users can read the hot spots
+  liveLabels
+    .transition().duration(500)
+    .style('opacity', 1)
+
+  // Keep cached refs in sync
+  nodeElements  = liveNodes
+  linkElements  = liveLinks
+  labelElements = liveLabels
+}
+
+const toggleHeatmap = () => {
+  if (heatmapActive.value) {
+    // Turning OFF — restore to default appearance
+    heatmapActive.value = false
+    resetHighlight()
+  } else {
+    // Turning ON — clear blast radius first, then apply heat
+    if (blastRadiusNode) {
+      blastRadiusNode = null
+      g.select('.impact-badges').selectAll('*').remove()
+      impactBadge = null
+    }
+    heatmapActive.value = true
+    applyHeatmap()
+  }
+}
+
+// ─── Stage 14: Topology Stats & Filtering ────────────────────────────────
+const toggleTopologyFilter = (type) => {
+  // Toggling the same pill off — resetHighlight clears activeTopologyFilter for us
+  if (activeTopologyFilter.value === type) {
+    resetHighlight()
+    return
+  }
+
+  // Reset all D3 visuals to baseline first (this also nullifies activeTopologyFilter)
+  resetHighlight()
+
+  // Set the active filter AFTER reset, so the pill becomes visually active
+  activeTopologyFilter.value = type
+
+  if (!g) return
+
+  const isMatch = (n) => {
+    if (!n || !n.id) return false
+    const isEntry = n.id.endsWith('App.vue') || n.id.endsWith('main.js') || n.id.includes('/router/')
+    if (type === 'entryPoints') return isEntry
+    if (type === 'hubs') return (n.in_degree || 0) >= 3 && (n.out_degree || 0) >= 3
+    if (type === 'leaves') return (n.out_degree || 0) === 0
+    if (type === 'orphans') return (n.in_degree || 0) === 0 && !isEntry
+    return false
+  }
+
+  const liveNodes = g.select('.nodes').selectAll('circle')
+  const liveLinks = g.select('.links').selectAll('path')
+  const liveLabels = g.select('.labels').selectAll('text')
+
+  liveNodes
+    .transition().duration(300)
+    .attr('opacity', function() {
+      const d = d3.select(this).datum()
+      return isMatch(d) ? 1 : 0.1
+    })
+    .attr('stroke-width', function() {
+      const d = d3.select(this).datum()
+      return isMatch(d) ? 3 : 2
+    })
+
+  liveLinks
+    .transition().duration(300)
+    .attr('opacity', function() {
+      const d = d3.select(this).datum()
+      if (!d) return 0.1
+      const src = typeof d.source === 'object' ? d.source : { id: String(d.source), in_degree: 0, out_degree: 0 }
+      const tgt = typeof d.target === 'object' ? d.target : { id: String(d.target), in_degree: 0, out_degree: 0 }
+      return (isMatch(src) || isMatch(tgt)) ? 0.6 : 0.1
+    })
+
+  liveLabels
+    .transition().duration(300)
+    .style('opacity', function() {
+      const d = d3.select(this).datum()
+      return isMatch(d) ? 1 : 0
+    })
+}
+
 
 const applyHighlight = (selectedNode) => {
   if (layoutMode.value === 'radial' || !nodeElements || !linkElements || !labelElements) return
+  if (blastRadiusNode) return
+
   const connected = new Set([selectedNode.id])
   linkElements.each(d => {
     if (d.source.id === selectedNode.id) connected.add(d.target.id)
@@ -382,6 +691,115 @@ const applyHighlight = (selectedNode) => {
     .attr('opacity', d => (d.source.id === selectedNode.id || d.target.id === selectedNode.id) ? 1.0 : 0.1)
     .attr('stroke-width', d => (d.source.id === selectedNode.id || d.target.id === selectedNode.id) ? 2.5 : 1.5)
   labelElements.style('opacity', n => connected.has(n.id) ? 1 : (nodeRadius(n) < 8 ? 0 : 0.1))
+}
+
+const showBlastRadius = (selectedNode) => {
+  if (layoutMode.value === 'radial' || !nodeElements || !linkElements || !labelElements) return
+
+  const directDependents = new Set()
+  const transitiveDependents = new Set()
+  
+  // Build reverse adjacency list (target -> list of sources) to find who depends on this node
+  const adj = {}
+  linkElements.each(d => {
+    if (!adj[d.target.id]) adj[d.target.id] = []
+    adj[d.target.id].push(d.source.id)
+  })
+
+  // Find direct dependents
+  if (adj[selectedNode.id]) {
+    adj[selectedNode.id].forEach(id => directDependents.add(id))
+  }
+
+  // BFS for transitive dependents
+  const queue = [...directDependents]
+  const visited = new Set(directDependents)
+  while (queue.length > 0) {
+    const curr = queue.shift()
+    if (adj[curr]) {
+      adj[curr].forEach(id => {
+        if (!visited.has(id) && id !== selectedNode.id) {
+          visited.add(id)
+          transitiveDependents.add(id)
+          queue.push(id)
+        }
+      })
+    }
+  }
+
+  // Remove direct dependents from transitive set
+  directDependents.forEach(id => transitiveDependents.delete(id))
+  const totalAffected = directDependents.size + transitiveDependents.size
+
+  nodeElements
+    .attr('opacity', n => {
+      if (n.id === selectedNode.id || directDependents.has(n.id)) return 1
+      if (transitiveDependents.has(n.id)) return 0.6
+      return 0.1
+    })
+    .attr('stroke', n => {
+      if (n.id === selectedNode.id) return '#3b82f6' // Blue ring
+      if (directDependents.has(n.id)) return '#f97316' // Orange tint
+      if (transitiveDependents.has(n.id)) return '#eab308' // Yellow tint
+      return (n.is_in_cycle || n.category === 'entry_point') ? (n.is_in_cycle ? '#dc2626' : '#facc15') : d3.color(getNodeColor(n)).darker(1).formatHex()
+    })
+    .attr('stroke-width', n => (n.id === selectedNode.id || directDependents.has(n.id) || transitiveDependents.has(n.id)) ? 3 : 2)
+    .attr('fill', n => {
+      if (n.id === selectedNode.id) return getNodeColor(n)
+      if (directDependents.has(n.id)) return '#fdba74' // Light orange
+      if (transitiveDependents.has(n.id)) return '#fde047' // Light yellow
+      return n.category === 'missing' ? 'url(#missing-pattern)' : getNodeColor(n)
+    })
+
+  linkElements
+    .attr('opacity', d => {
+      if (d.target.id === selectedNode.id) return 1.0 
+      if (transitiveDependents.has(d.source.id) && visited.has(d.target.id)) return 0.6 
+      if (visited.has(d.source.id) && visited.has(d.target.id)) return 0.8
+      if (visited.has(d.source.id) && d.target.id === selectedNode.id) return 1.0
+      return 0.1
+    })
+    .attr('stroke-width', d => {
+      if (d.target.id === selectedNode.id) return 2.5
+      if (visited.has(d.source.id) && visited.has(d.target.id)) return 2
+      return 1.5
+    })
+    .attr('stroke', d => {
+       if (d.target.id === selectedNode.id) return '#f97316'
+       if (visited.has(d.source.id) && visited.has(d.target.id)) return '#eab308'
+       return getEdgeColor(d.relationship_type)
+    })
+
+  labelElements.style('opacity', n => {
+    if (n.id === selectedNode.id || directDependents.has(n.id) || transitiveDependents.has(n.id)) return 1
+    return nodeRadius(n) < 8 ? 0 : 0.1
+  })
+
+  // Add badge
+  if (totalAffected > 0) {
+    const badgeGroup = g.select('.impact-badges').selectAll('.badge').data([selectedNode], d => d.id)
+    badgeGroup.exit().remove()
+    
+    const enter = badgeGroup.enter().append('g').attr('class', 'badge').attr('transform', d => `translate(${d.x},${d.y})`)
+    enter.append('rect')
+      .attr('x', 12).attr('y', -30)
+      .attr('width', 96).attr('height', 18)
+      .attr('rx', 4)
+      .attr('fill', '#ef4444').attr('opacity', 0.95)
+    enter.append('text')
+      .attr('x', 60).attr('y', -17)
+      .attr('fill', 'white')
+      .attr('font-size', '9px')
+      .attr('font-weight', 'bold')
+      .attr('text-anchor', 'middle')
+      .text(`Affects ${totalAffected} files`)
+      .style('pointer-events', 'none')
+    
+    impactBadge = g.select('.impact-badges').selectAll('.badge')
+  } else {
+    g.select('.impact-badges').selectAll('*').remove()
+    impactBadge = null
+  }
 }
 
 const updateGraph = () => {
@@ -477,7 +895,7 @@ const updateGraph = () => {
           is_in_cycle: d.is_in_cycle
         }
       }
-      if (!pinnedNode) applyHighlight(d)
+      if (!pinnedNode && !blastRadiusNode) applyHighlight(d)
     })
     .on('mousemove', (event) => {
       if (!tooltip.value.visible) return
@@ -490,13 +908,24 @@ const updateGraph = () => {
       tooltip.value.x = tx
       tooltip.value.y = ty
     })
-    .on('mouseout', () => { 
-      tooltip.value.visible = false 
-      if (!pinnedNode) resetHighlight()
+    .on('mouseout', () => {
+      tooltip.value.visible = false
+      if (!pinnedNode && !blastRadiusNode) resetHighlight()
     })
     .on('click', (event, d) => {
       event.stopPropagation()
-      enterFocusedMode(d)
+      if (event.shiftKey) {
+        if (blastRadiusNode && blastRadiusNode.id === d.id) {
+          blastRadiusNode = null
+          resetHighlight()
+        } else {
+          resetHighlight()
+          blastRadiusNode = d
+          showBlastRadius(d)
+        }
+      } else {
+        enterFocusedMode(d)
+      }
     })
 
   labelElements = g.select('.labels')
@@ -745,9 +1174,11 @@ const enterFocusedMode = (node) => {
 }
 
 const exitFocusedMode = () => {
+  // Switch layout state immediately so resetHighlight() guard passes
   layoutMode.value = 'force'
   focusedNode.value = null
   pinnedNode = null
+  blastRadiusNode = null
 
   graphNodes.forEach(d => {
     d.fx = null
@@ -756,7 +1187,7 @@ const exitFocusedMode = () => {
 
   const finishExit = () => {
     simulation.alpha(0.3).restart()
-    resetHighlight()
+    resetHighlight() // Safe: layoutMode is already 'force', nodeElements exist
   }
 
   if (svg && preRadialTransform) {
