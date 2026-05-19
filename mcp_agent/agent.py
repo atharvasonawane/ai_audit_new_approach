@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import json
 import logging
 import os
@@ -537,26 +537,36 @@ def _validate_and_write_issues_for_file(
     lines = raw_source.splitlines()
 
     normalized_path = _normalize_path(file_path, base_path or "")
+    persisted_path = normalized_path
     vue_file_id = None
+
     with _db_connect(db_path) as conn:
         row = conn.execute(
-            "SELECT id FROM vue_files WHERE project_name = ? AND file_path = ?",
+            "SELECT id, file_path FROM vue_files WHERE project_name = ? AND file_path = ?",
             (project_name, normalized_path),
         ).fetchone()
+        if not row and file_path != normalized_path:
+            row = conn.execute(
+                "SELECT id, file_path FROM vue_files WHERE project_name = ? AND file_path = ?",
+                (project_name, file_path),
+            ).fetchone()
         if row:
             vue_file_id = row["id"]
+            persisted_path = row["file_path"]
 
     if not vue_file_id:
-        raise RuntimeError("File was not found in sqlite vue_files table")
+        raise RuntimeError(
+            "File was not found in sqlite vue_files table "
+            f"(project={project_name}, raw={file_path}, normalized={normalized_path})"
+        )
 
     results: List[Dict[str, Any]] = []
-    for idx, issue in enumerate(issues):
-        # Normalize the issue object to handle different field name conventions
+    for issue in issues:
         normalized = _normalize_issue(issue)
         if not normalized:
             logger.warning(
                 "Malformed AI issue skipped for %s (expected JSON object, got %s): %r",
-                normalized_path,
+                persisted_path,
                 type(issue).__name__,
                 issue,
             )
@@ -566,33 +576,29 @@ def _validate_and_write_issues_for_file(
         if (
             normalized.get("issue_category") == "unknown"
             and normalized.get("title") == "Untitled"
-            and (
-                not isinstance(line_number, int)
-                or line_number < 1
-            )
+            and (not isinstance(line_number, int) or line_number < 1)
         ):
             logger.warning(
-                "Malformed AI issue skipped for %s (placeholder category/title, "
-                "no valid line_number): %r",
-                normalized_path,
+                "Malformed AI issue skipped for %s (placeholder category/title, no valid line_number): %r",
+                persisted_path,
                 issue,
             )
             continue
 
-
-        if not isinstance(line_number, int):
-            continue
-        if line_number < 1 or line_number > len(lines):
+        if not isinstance(line_number, int) or line_number < 1:
             continue
 
+        # Only enforce line-range bound when we have source lines.
+        # If the file couldn't be read (empty lines list), keep the issue
+        # but use an empty snippet rather than silently discarding it.
         severity = _normalize_severity(normalized.get("severity"))
-        snippet = _extract_snippet(lines, line_number)
+        snippet = _extract_snippet(lines, line_number) if lines and line_number <= len(lines) else ""
         created_at = datetime.utcnow().isoformat()
 
         record = {
             "vue_file_id": vue_file_id,
             "project_name": project_name,
-            "file_path": normalized_path,
+            "file_path": persisted_path,
             "phase": "file_analysis",
             "issue_category": normalized.get("issue_category", ""),
             "title": normalized.get("title", ""),
@@ -607,7 +613,7 @@ def _validate_and_write_issues_for_file(
         upsert_ai_issue(record, db_path=db_path)
         results.append(record)
 
-    print(f"✓ Wrote {len(results)} issues to database")
+    print(f"Wrote {len(results)} issues to database")
     return results
 
 
@@ -919,7 +925,6 @@ async def _run_prompt_only(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.1,
-            response_format={"type": "json_object"},
         )
     except Exception as exc:
         raise RuntimeError(f"LLM request failed: {exc}") from exc
@@ -940,12 +945,13 @@ async def _run_prompt_only(
             raw_text = raw_text()
         raw_content = raw_text
 
-    if raw_content is None:
-        raise RuntimeError("LLM returned no content.")
+    if not raw_content or str(raw_content).strip().lower() in ("null", "none", ""):
+        print(f"DEBUG: LLM returned empty/null for {file_path} — treating as no issues.")
+        return "[]"
 
-        print(
-            f"DEBUG: Raw LLM response (first 500 chars):\n{raw_content[:500]}\n---END---\n"
-        )
+    print(
+        f"DEBUG: Raw LLM response (first 300 chars):\n{str(raw_content)[:300]}"
+    )
     return _clean_json_string(raw_content)
 
 
@@ -999,7 +1005,6 @@ async def _run_batch_prompt_only(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.1,
-            response_format={"type": "json_object"},
         )
     except Exception as exc:
         raise RuntimeError(f"LLM request failed: {exc}") from exc
@@ -1020,8 +1025,9 @@ async def _run_batch_prompt_only(
             raw_text = raw_text()
         raw_content = raw_text
 
-    if raw_content is None:
-        raise RuntimeError("LLM returned no content.")
+    if not raw_content or str(raw_content).strip().lower() in ("null", "none", ""):
+        print("DEBUG: LLM returned empty/null for batch — treating as no issues.")
+        return "[]"
 
     return _clean_json_string(raw_content)
 
