@@ -1,4 +1,4 @@
-base_path: C:/Users/Atharvaso/Desktop/StudentManagement/StudentManagement/client/app/src
+﻿base_path: C:\Users\Atharvaso\Desktop\PortalManagement\client\app\src
 db:
   path: audit_history.db
 generic_api:
@@ -11,7 +11,7 @@ module: null
 mql:
   confidence: HIGH
   pattern: \w+\.\[(\w+)\]
-project_name: new_university
+project_name: mkcl_university
 spelling:
   ignore_words:
   - DU
