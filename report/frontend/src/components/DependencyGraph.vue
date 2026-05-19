@@ -59,6 +59,31 @@
           </svg>
           Heatmap
         </button>
+
+        <!-- Layout Mode Switcher -->
+        <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-full p-0.5 border border-gray-200 dark:border-gray-700">
+          <button
+            class="flex items-center gap-1 py-1 px-2.5 rounded-full text-[11px] font-semibold cursor-pointer transition-all duration-150"
+            :class="layoutMode === 'force' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'"
+            title="Force — nodes float freely" @click="setGraphLayout('force')">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="8" r="2"/><circle cx="2" cy="3" r="1.5"/><circle cx="14" cy="13" r="1.5"/><path d="M3.5 4.5l3 3M9.5 9.5l3 3"/></svg>
+            Force
+          </button>
+          <button
+            class="flex items-center gap-1 py-1 px-2.5 rounded-full text-[11px] font-semibold cursor-pointer transition-all duration-150"
+            :class="layoutMode === 'vertical' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'"
+            title="Vertical tree — layers top-to-bottom by depth" @click="setGraphLayout('vertical')">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="2" r="1.4"/><circle cx="3" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4"/><line x1="8" y1="3.4" x2="3" y2="6.6"/><line x1="8" y1="3.4" x2="13" y2="6.6"/></svg>
+            Vertical
+          </button>
+          <button
+            class="flex items-center gap-1 py-1 px-2.5 rounded-full text-[11px] font-semibold cursor-pointer transition-all duration-150"
+            :class="layoutMode === 'horizontal' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'"
+            title="Horizontal tree — layers left-to-right by depth" @click="setGraphLayout('horizontal')">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="2" cy="8" r="1.4"/><circle cx="10" cy="3" r="1.4"/><circle cx="10" cy="13" r="1.4"/><line x1="3.4" y1="8" x2="8.6" y2="3.4"/><line x1="3.4" y1="8" x2="8.6" y2="12.6"/></svg>
+            Horizontal
+          </button>
+        </div>
       </div>
     </div>
 
@@ -97,7 +122,7 @@
       <div class="flex-1 relative w-full h-full overflow-hidden" ref="graphWrapper">
         
         <!-- Topology Stats Bar -->
-        <div v-show="viewMode === 'graph' && layoutMode === 'force'" class="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border border-gray-200 dark:border-gray-700 rounded-full shadow-sm px-3 py-1.5 text-[11px] font-semibold text-gray-700 dark:text-gray-300 transition-all">
+        <div v-show="viewMode === 'graph' && !focusedNode" class="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border border-gray-200 dark:border-gray-700 rounded-full shadow-sm px-3 py-1.5 text-[11px] font-semibold text-gray-700 dark:text-gray-300 transition-all">
           <span class="px-2 border-r border-gray-300 dark:border-gray-600">Total: {{ topologyStats.total }}</span>
           
           <button @click.stop="toggleTopologyFilter('entryPoints')" 
@@ -129,8 +154,9 @@
 
       
       <!-- Tooltip -->
-      <div v-show="tooltip.visible && viewMode === 'graph'" class="fixed bg-white/95 dark:bg-gray-950/95 border border-gray-200 dark:border-gray-800 rounded-lg p-3 text-gray-900 dark:text-gray-100 pointer-events-none z-[100] shadow-[0_4px_12px_rgba(0,0,0,0.15)] min-w-[150px] backdrop-blur-sm" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
-        <div class="text-[13px] font-semibold text-gray-900 dark:text-gray-100 mb-1">{{ tooltip.data.basename }}</div>
+      <div v-show="tooltip.visible && viewMode === 'graph'" class="fixed bg-white/95 dark:bg-gray-950/95 border border-gray-200 dark:border-gray-800 rounded-lg p-3 text-gray-900 dark:text-gray-100 pointer-events-none z-[100] shadow-[0_4px_12px_rgba(0,0,0,0.15)] min-w-[180px] max-w-[300px] backdrop-blur-sm" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
+        <div class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5">{{ tooltip.data.basename }}</div>
+        <div class="text-[10px] font-mono text-gray-400 dark:text-gray-500 mb-2 break-all leading-snug">{{ tooltip.data.fullpath }}</div>
         <div class="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" :style="{color: getNodeColor(tooltip.data)}">{{ tooltip.data.category }}</div>
         <div class="flex flex-col gap-0.5 text-[12px] text-gray-600 dark:text-gray-400">
           <div>In: <strong class="text-gray-900 dark:text-gray-100">{{ tooltip.data.in_degree }}</strong></div>
@@ -154,12 +180,12 @@
       </div>
 
       <!-- Mini-map -->
-      <div v-show="viewMode === 'graph' && layoutMode === 'force'" class="absolute bottom-[20px] right-[20px] w-[160px] h-[100px] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm overflow-hidden z-40">
+      <div v-show="viewMode === 'graph' && !focusedNode" class="absolute bottom-[20px] right-[20px] w-[160px] h-[100px] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm overflow-hidden z-40">
         <svg ref="minimapSvgRef" class="w-full h-full cursor-pointer bg-transparent" @click="onMinimapClick"></svg>
       </div>
 
       <!-- Focused Mode Header -->
-      <div v-if="layoutMode === 'radial'" class="absolute top-4 left-4 z-20">
+      <div v-if="focusedNode" class="absolute top-4 left-4 z-20">
         <button @click="exitFocusedMode" class="flex items-center gap-1.5 px-3 py-1.5 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           Back to Full Graph
@@ -167,7 +193,7 @@
       </div>
 
       <!-- Focused Mode Info Card -->
-      <div v-if="layoutMode === 'radial' && focusedNode" class="absolute bottom-[24px] left-1/2 -translate-x-1/2 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-4 min-w-[280px]">
+      <div v-if="focusedNode" class="absolute bottom-[24px] left-1/2 -translate-x-1/2 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-4 min-w-[280px]">
         <div class="text-sm font-bold text-gray-900 dark:text-gray-100 mb-1 flex items-center gap-2">
           <span class="w-2.5 h-2.5 rounded-full shadow-inner" :style="{ backgroundColor: getNodeColor(focusedNode) }"></span>
           {{ getBasename(focusedNode.id) }}
@@ -350,20 +376,26 @@ onBeforeUnmount(() => {
 })
 
 const ticked = () => {
-  if (layoutMode.value === 'radial') return
+  if (focusedNode.value) return
   if (!nodeElements || !linkElements) return
 
-  linkElements.attr("d", d => {
-    const dx = d.target.x - d.source.x
-    const dy = d.target.y - d.source.y
-    return `M${d.source.x},${d.source.y} C${d.source.x},${(d.source.y + d.target.y)/2} ${d.target.x},${(d.source.y + d.target.y)/2} ${d.target.x},${d.target.y}`
-  })
-  
+  if (layoutMode.value === 'vertical') {
+    linkElements.attr("d", d => {
+      const midY = (d.source.y + d.target.y) / 2
+      return `M${d.source.x},${d.source.y} C${d.source.x},${midY} ${d.target.x},${midY} ${d.target.x},${d.target.y}`
+    })
+  } else if (layoutMode.value === 'horizontal') {
+    linkElements.attr("d", d => {
+      const midX = (d.source.x + d.target.x) / 2
+      return `M${d.source.x},${d.source.y} C${midX},${d.source.y} ${midX},${d.target.y} ${d.target.x},${d.target.y}`
+    })
+  } else {
+    linkElements.attr("d", d => `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`)
+  }
+
   nodeElements.attr("cx", d => d.x).attr("cy", d => d.y)
   if (labelElements) labelElements.attr("x", d => d.x).attr("y", d => d.y)
-  
   if (svg) svg.selectAll('marker').attr('refX', 22)
-  
   updateMinimap()
 }
 
@@ -377,12 +409,11 @@ const initGraph = () => {
   svg.attr('width', width)
     .attr('height', height)
     .on('click', () => {
-      if (layoutMode.value === 'radial') exitFocusedMode()
-      else {
-        pinnedNode = null
-        blastRadiusNode = null
-        resetHighlight()
-      }
+      // Never reset anything while a file is focused — only the Back button exits.
+      if (focusedNode.value) return
+      pinnedNode = null
+      blastRadiusNode = null
+      resetHighlight()
     })
 
   minimapSvg = d3.select(minimapSvgRef.value)
@@ -677,7 +708,7 @@ const toggleTopologyFilter = (type) => {
 
 
 const applyHighlight = (selectedNode) => {
-  if (layoutMode.value === 'radial' || !nodeElements || !linkElements || !labelElements) return
+  if (focusedNode.value || !nodeElements || !linkElements || !labelElements) return
   if (blastRadiusNode) return
 
   const connected = new Set([selectedNode.id])
@@ -694,7 +725,7 @@ const applyHighlight = (selectedNode) => {
 }
 
 const showBlastRadius = (selectedNode) => {
-  if (layoutMode.value === 'radial' || !nodeElements || !linkElements || !labelElements) return
+  if (focusedNode.value || !nodeElements || !linkElements || !labelElements) return
 
   const directDependents = new Set()
   const transitiveDependents = new Set()
@@ -888,6 +919,7 @@ const updateGraph = () => {
         y: ty,
         data: {
           basename: getBasename(d.id),
+          fullpath: d.id,
           category: d.category,
           in_degree: d.in_degree,
           out_degree: d.out_degree,
@@ -943,25 +975,102 @@ const updateGraph = () => {
 
   simulation.nodes(graphNodes)
   simulation.force("link", d3.forceLink(graphLinks).id(d => d.id))
-  simulation.force("center", d3.forceCenter(width / 2, height / 2).strength(0.08))
-  simulation.force("x", d3.forceX(width / 2).strength(0.05))
-  simulation.force("y", d3.forceY(height / 2).strength(0.05))
-  simulation.force("layer", d3.forceY(d => {
-    if (d.depth === 0 || d.category === 'entry_point') return height * 0.1
-    if (d.category === 'orphan') return height * 0.9
-    if (d.category === 'leaf') return height * 0.85
-    return height * 0.1 + ((d.depth || 0) / maxDepth) * height * 0.7
-  }).strength(0.3))
-  simulation.force("collide", d3.forceCollide().radius(d => nodeRadius(d) + 12).iterations(3))
-  
+
+  if (layoutMode.value === 'vertical') {
+    applyStructuredLayout(graphNodes, width, height, 'vertical')
+  } else if (layoutMode.value === 'horizontal') {
+    applyStructuredLayout(graphNodes, width, height, 'horizontal')
+  } else {
+    graphNodes.forEach(d => { d.fx = null; d.fy = null })
+    simulation.force("center", d3.forceCenter(width / 2, height / 2).strength(0.08))
+    simulation.force("x", d3.forceX(width / 2).strength(0.05))
+    simulation.force("y", d3.forceY(height / 2).strength(0.05))
+    simulation.force("layer", d3.forceY(d => {
+      if (d.depth === 0 || d.category === 'entry_point') return height * 0.1
+      if (d.category === 'orphan') return height * 0.9
+      if (d.category === 'leaf') return height * 0.85
+      return height * 0.1 + ((d.depth || 0) / maxDepth) * height * 0.7
+    }).strength(0.3))
+    simulation.force("collide", d3.forceCollide().radius(d => nodeRadius(d) + 12).iterations(3))
+    simulation.force("charge", d3.forceManyBody().strength(-120))
+  }
+
   resetHighlight()
+  simulation.alpha(1).restart()
+}
+
+// ─── Structured Layout Engine (Vertical & Horizontal) ────────────────────
+const applyStructuredLayout = (nodes, width, height, direction) => {
+  const STEP = direction === 'vertical' ? 150 : 200
+  const PAD  = 80
+  const byDepth = {}
+  let maxDepthSeen = 0
+  nodes.forEach(n => {
+    const d = (n.depth != null && n.depth >= 0) ? n.depth : -1
+    if (!byDepth[d]) byDepth[d] = []
+    byDepth[d].push(n)
+    if (d > maxDepthSeen) maxDepthSeen = d
+  })
+  Object.entries(byDepth).forEach(([depthStr, group]) => {
+    const depth = parseInt(depthStr)
+    const pos = depth < 0 ? PAD + (maxDepthSeen + 1) * STEP : PAD + depth * STEP
+    group.forEach((n, i) => {
+      if (direction === 'vertical') {
+        n.fy = pos; n.fx = null
+        if (!n.x || Math.abs(n.x - width / 2) < 2) n.x = (width / (group.length + 1)) * (i + 1)
+      } else {
+        n.fx = pos; n.fy = null
+        if (!n.y || Math.abs(n.y - height / 2) < 2) n.y = (height / (group.length + 1)) * (i + 1)
+      }
+    })
+  })
+  if (direction === 'vertical') {
+    simulation.force("layer", null); simulation.force("y", null); simulation.force("center", null)
+    simulation.force("x", d3.forceX(width / 2).strength(0.04))
+  } else {
+    simulation.force("layer", null); simulation.force("x", null); simulation.force("center", null)
+    simulation.force("y", d3.forceY(height / 2).strength(0.04))
+  }
+  simulation.force("collide", d3.forceCollide().radius(d => nodeRadius(d) + 20).iterations(4))
+  simulation.force("charge", d3.forceManyBody().strength(-250))
+}
+
+const setGraphLayout = (mode) => {
+  if (layoutMode.value === mode) return
+  layoutMode.value = mode
+  if (!simulation || !graphNodes.length) return
+  const width = graphWrapper.value?.clientWidth || 800
+  const height = graphWrapper.value?.clientHeight || 600
+  if (focusedNode.value) {
+    applyFocusedLayout(focusedNode.value)
+    return
+  }
+  if (mode === 'vertical') {
+    applyStructuredLayout(graphNodes, width, height, 'vertical')
+  } else if (mode === 'horizontal') {
+    applyStructuredLayout(graphNodes, width, height, 'horizontal')
+  } else {
+    graphNodes.forEach(d => { d.fx = null; d.fy = null })
+    const maxDepth = Math.max(1, ...graphNodes.map(n => n.depth || 0))
+    simulation.force("center", d3.forceCenter(width / 2, height / 2).strength(0.08))
+    simulation.force("x", d3.forceX(width / 2).strength(0.05))
+    simulation.force("y", d3.forceY(height / 2).strength(0.05))
+    simulation.force("layer", d3.forceY(d => {
+      if (d.depth === 0 || d.category === 'entry_point') return height * 0.1
+      if (d.category === 'orphan') return height * 0.9
+      if (d.category === 'leaf') return height * 0.85
+      return height * 0.1 + ((d.depth || 0) / maxDepth) * height * 0.7
+    }).strength(0.3))
+    simulation.force("collide", d3.forceCollide().radius(d => nodeRadius(d) + 12).iterations(3))
+    simulation.force("charge", d3.forceManyBody().strength(-120))
+  }
   simulation.alpha(1).restart()
 }
 
 const highlightSearch = () => {
   const q = searchQuery.value.toLowerCase()
   pinnedNode = null
-  if (layoutMode.value === 'radial') exitFocusedMode()
+  if (focusedNode.value) exitFocusedMode()
   if (!q) {
     resetHighlight()
     return
@@ -1103,18 +1212,18 @@ const resetZoom = () => {
 let preRadialTransform = null
 
 const enterFocusedMode = (node) => {
-  if (layoutMode.value === 'radial') {
-    if (focusedNode.value?.id === node.id) return
-  } else {
-    preRadialTransform = currentTransform
-  }
-  
-  layoutMode.value = 'radial'
+  if (focusedNode.value?.id === node.id) return
+  if (!focusedNode.value) preRadialTransform = currentTransform
   focusedNode.value = node
   pinnedNode = node
-
   simulation.stop()
+  applyFocusedLayout(node)
+}
 
+// applyFocusedLayout: positions all nodes + edges for the selected file.
+// Called by enterFocusedMode AND by setGraphLayout (when mode changes while focused).
+// Has NO same-node guard so it always re-runs.
+const applyFocusedLayout = (node) => {
   const width = graphWrapper.value.clientWidth || 800
   const height = graphWrapper.value.clientHeight || 600
   const cx = width / 2
@@ -1122,72 +1231,107 @@ const enterFocusedMode = (node) => {
 
   const deps = []
   const dependents = []
-  
   linkElements.each(d => {
     if (d.source.id === node.id) deps.push(d.target)
     if (d.target.id === node.id) dependents.push(d.source)
   })
-  
   const connectedNodes = new Set([...deps.map(n => n.id), ...dependents.map(n => n.id), node.id])
 
+  graphNodes.forEach(d => { d.fx = null; d.fy = null })
   node.fx = cx
   node.fy = cy
 
-  const dependentRadius = Math.min(width, height) * 0.35
-  dependents.forEach((n, i) => {
-    const angle = dependents.length === 1 ? -Math.PI / 2 : -Math.PI + (i / (dependents.length - 1)) * Math.PI
-    n.fx = cx + Math.cos(angle) * dependentRadius
-    n.fy = cy + Math.sin(angle) * dependentRadius
-  })
+  if (layoutMode.value === 'vertical') {
+    const aboveY = cy - 160
+    dependents.forEach((n, i) => {
+      n.fy = aboveY
+      n.fx = dependents.length === 1 ? cx : (width / (dependents.length + 1)) * (i + 1)
+    })
+    const belowY = cy + 160
+    deps.forEach((n, i) => {
+      n.fy = belowY
+      n.fx = deps.length === 1 ? cx : (width / (deps.length + 1)) * (i + 1)
+    })
+  } else if (layoutMode.value === 'horizontal') {
+    const leftX = cx - 220
+    dependents.forEach((n, i) => {
+      n.fx = leftX
+      n.fy = dependents.length === 1 ? cy : (height / (dependents.length + 1)) * (i + 1)
+    })
+    const rightX = cx + 220
+    deps.forEach((n, i) => {
+      n.fx = rightX
+      n.fy = deps.length === 1 ? cy : (height / (deps.length + 1)) * (i + 1)
+    })
+  } else {
+    const r = Math.min(width, height) * 0.35
+    dependents.forEach((n, i) => {
+      const angle = dependents.length === 1 ? -Math.PI / 2 : -Math.PI + (i / (dependents.length - 1)) * Math.PI
+      n.fx = cx + Math.cos(angle) * r
+      n.fy = cy + Math.sin(angle) * r
+    })
+    deps.forEach((n, i) => {
+      const angle = deps.length === 1 ? Math.PI / 2 : (i / (deps.length - 1)) * Math.PI
+      n.fx = cx + Math.cos(angle) * r
+      n.fy = cy + Math.sin(angle) * r
+    })
+  }
 
-  const depRadius = Math.min(width, height) * 0.35
-  deps.forEach((n, i) => {
-    const angle = deps.length === 1 ? Math.PI / 2 : (i / (deps.length - 1)) * Math.PI
-    n.fx = cx + Math.cos(angle) * depRadius
-    n.fy = cy + Math.sin(angle) * depRadius
-  })
+  const edgePath = (sx, sy, tx, ty) => {
+    if (layoutMode.value === 'vertical') {
+      const midY = (sy + ty) / 2
+      return `M${sx},${sy} C${sx},${midY} ${tx},${midY} ${tx},${ty}`
+    } else if (layoutMode.value === 'horizontal') {
+      const midX = (sx + tx) / 2
+      return `M${sx},${sy} C${midX},${sy} ${midX},${ty} ${tx},${ty}`
+    }
+    return `M${sx},${sy} L${tx},${ty}`
+  }
 
   nodeElements.transition().duration(750)
-    .attr("cx", d => d.fx !== undefined ? d.fx : d.x)
-    .attr("cy", d => d.fy !== undefined ? d.fy : d.y)
+    .attr('cx', d => d.fx != null ? d.fx : d.x)
+    .attr('cy', d => d.fy != null ? d.fy : d.y)
     .attr('opacity', d => connectedNodes.has(d.id) ? (d.id === node.id ? 1 : 0.9) : 0)
 
   labelElements.transition().duration(750)
-    .attr("x", d => d.fx !== undefined ? d.fx : d.x)
-    .attr("y", d => d.fy !== undefined ? d.fy : d.y)
+    .attr('x', d => d.fx != null ? d.fx : d.x)
+    .attr('y', d => d.fy != null ? d.fy : d.y)
     .style('opacity', d => connectedNodes.has(d.id) ? 1 : 0)
 
   linkElements.transition().duration(750)
-    .attr("d", d => {
-       const sx = d.source.fx !== undefined ? d.source.fx : d.source.x
-       const sy = d.source.fy !== undefined ? d.source.fy : d.source.y
-       const tx = d.target.fx !== undefined ? d.target.fx : d.target.x
-       const ty = d.target.fy !== undefined ? d.target.fy : d.target.y
-       return `M${sx},${sy} L${tx},${ty}`
+    .attr('d', d => {
+      const sx = d.source.fx != null ? d.source.fx : d.source.x
+      const sy = d.source.fy != null ? d.source.fy : d.source.y
+      const tx = d.target.fx != null ? d.target.fx : d.target.x
+      const ty = d.target.fy != null ? d.target.fy : d.target.y
+      return edgePath(sx, sy, tx, ty)
     })
     .attr('opacity', d => (d.source.id === node.id || d.target.id === node.id) ? 0.8 : 0)
     .attr('stroke-width', d => (d.source.id === node.id || d.target.id === node.id) ? 2.5 : 0)
 
-  if (svg) {
-    svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity)
-  }
+  if (svg) svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity)
 }
 
 const exitFocusedMode = () => {
-  // Switch layout state immediately so resetHighlight() guard passes
-  layoutMode.value = 'force'
   focusedNode.value = null
   pinnedNode = null
   blastRadiusNode = null
 
-  graphNodes.forEach(d => {
-    d.fx = null
-    d.fy = null
-  })
+  graphNodes.forEach(d => { d.fx = null; d.fy = null })
+
+  const width = graphWrapper.value?.clientWidth || 800
+  const height = graphWrapper.value?.clientHeight || 600
 
   const finishExit = () => {
-    simulation.alpha(0.3).restart()
-    resetHighlight() // Safe: layoutMode is already 'force', nodeElements exist
+    if (layoutMode.value === 'vertical') {
+      applyStructuredLayout(graphNodes, width, height, 'vertical')
+    } else if (layoutMode.value === 'horizontal') {
+      applyStructuredLayout(graphNodes, width, height, 'horizontal')
+    } else {
+      simulation.force("charge", d3.forceManyBody().strength(-120))
+    }
+    simulation.alpha(0.5).restart()
+    resetHighlight()
   }
 
   if (svg && preRadialTransform) {
@@ -1198,7 +1342,7 @@ const exitFocusedMode = () => {
 }
 
 const dragstarted = (event, d) => {
-  if (layoutMode.value === 'radial') return
+  if (focusedNode.value) return
   if (!event.active) simulation.alphaTarget(0.3).restart()
   d.fx = d.x
   d.fy = d.y
