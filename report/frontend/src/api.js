@@ -2,7 +2,7 @@ import axios from 'axios'
 
 // Create axios instance with base URL
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: window.__FLASK_PORT__ ? `http://localhost:${window.__FLASK_PORT__}/api` : 'http://localhost:5000/api',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',

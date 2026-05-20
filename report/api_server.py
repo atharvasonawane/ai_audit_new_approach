@@ -6,6 +6,7 @@ All endpoints return JSON with CORS headers.
 Dynamic code snippets generated for api_calls, file_flags, and accessibility_defects.
 """
 
+import argparse
 import json
 import sqlite3
 from pathlib import Path
@@ -31,7 +32,13 @@ def _load_config() -> Dict[str, Any]:
 
 
 CONFIG = _load_config()
-DB_PATH = Path(CONFIG.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db"))
+db_config_path = CONFIG.get("db", {}).get("path")
+if db_config_path:
+    DB_PATH = Path(db_config_path)
+    if not DB_PATH.is_absolute():
+        DB_PATH = PROJECT_ROOT / DB_PATH
+else:
+    DB_PATH = PROJECT_ROOT / "audit_history.db"
 PROJECT_NAME = CONFIG.get("project_name", "default")
 BASE_PATH = CONFIG.get("base_path", "")
 
@@ -757,6 +764,10 @@ def health_check():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Code Audit Librarian API Server")
+    parser.add_argument("--port", type=int, default=5000, help="Port to run the API server on")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("Code Audit Librarian — Flask API Server (Stage 6)")
     print("=" * 60)
@@ -764,8 +775,8 @@ if __name__ == "__main__":
     print(f"Database: {DB_PATH}")
     print(f"Base Path: {BASE_PATH}")
     print("=" * 60)
-    print("Starting server on http://localhost:5000")
-    print("API endpoints available at http://localhost:5000/api/*")
+    print(f"Starting server on http://localhost:{args.port}")
+    print(f"API endpoints available at http://localhost:{args.port}/api/*")
     print("=" * 60)
     
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=args.port, debug=False)

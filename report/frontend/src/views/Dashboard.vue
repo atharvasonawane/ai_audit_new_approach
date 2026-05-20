@@ -326,7 +326,8 @@ const fetchDashboardData = async () => {
     worstOffenders.value = offendersRes.data || []
   } catch (err) {
     if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
-      error.value = 'Cannot connect to API server. Ensure Flask is running on http://localhost:5000'
+      const port = window.__FLASK_PORT__ || 5000;
+      error.value = `Cannot connect to API server. Ensure Flask is running on http://localhost:${port}`
     } else {
       error.value = err.message || 'An unexpected error occurred'
     }

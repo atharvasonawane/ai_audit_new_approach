@@ -1,4 +1,4 @@
-﻿base_path: C:\Users\Atharvaso\Desktop\PortalManagement\client\app\src
+﻿base_path: C:\Users\Atharvaso\Desktop\StudentManagement
 db:
   path: audit_history.db
 generic_api:
