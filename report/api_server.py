@@ -199,6 +199,108 @@ def _extract_snippet(file_path: str, line_number: int) -> str:
         return f"[Error reading file: {e}]"
 
 
+@app.route("/api/recent-audits", methods=["GET"])
+def get_recent_audits():
+    """
+    GET /api/recent-audits
+    Returns list of recent audits from audit_runs table with their actual metrics.
+    """
+    try:
+        conn = _db_connect()
+        runs = conn.execute(
+            """
+            SELECT id, project_name, started_at, status, completed_at
+            FROM audit_runs
+            ORDER BY started_at DESC
+            """
+        ).fetchall()
+        
+        recent_audits = []
+        for run in runs:
+            proj_name = run["project_name"]
+            
+            # Count total files
+            total_files = conn.execute(
+                "SELECT COUNT(*) as count FROM vue_files WHERE project_name = ?",
+                (proj_name,)
+            ).fetchone()["count"]
+            
+            # Count ESLint flags
+            total_eslint = conn.execute(
+                "SELECT COALESCE(SUM(eslint_flag_count), 0) as count FROM vue_files WHERE project_name = ?",
+                (proj_name,)
+            ).fetchone()["count"]
+            
+            # Count Accessibility defects
+            total_accessibility = conn.execute(
+                "SELECT COUNT(*) as count FROM accessibility_defects WHERE project_name = ?",
+                (proj_name,)
+            ).fetchone()["count"]
+            
+            # Count AI issues
+            total_ai = conn.execute(
+                "SELECT COUNT(*) as count FROM ai_issues WHERE project_name = ? AND phase = 'file_analysis'",
+                (proj_name,)
+            ).fetchone()["count"]
+            
+            total_issues = total_eslint + total_accessibility + total_ai
+            
+            # Fallback for project name if empty/null
+            display_name = proj_name if proj_name else PROJECT_ROOT.name
+            
+            recent_audits.append({
+                "project_name": display_name,
+                "started_at": run["started_at"],
+                "status": run["status"],
+                "completed_at": run["completed_at"],
+                "total_files": total_files,
+                "total_issues": total_issues
+            })
+            
+        # If audit_runs is empty, but vue_files has data
+        if not recent_audits:
+            # Check if there are files in vue_files
+            distinct_projects = conn.execute("SELECT DISTINCT project_name FROM vue_files").fetchall()
+            for row in distinct_projects:
+                proj_name = row["project_name"]
+                # Count total files
+                total_files = conn.execute(
+                    "SELECT COUNT(*) as count FROM vue_files WHERE project_name = ?",
+                    (proj_name,)
+                ).fetchone()["count"]
+                if total_files > 0:
+                    # Count ESLint, Accessibility, AI
+                    total_eslint = conn.execute(
+                        "SELECT COALESCE(SUM(eslint_flag_count), 0) as count FROM vue_files WHERE project_name = ?",
+                        (proj_name,)
+                    ).fetchone()["count"]
+                    total_accessibility = conn.execute(
+                        "SELECT COUNT(*) as count FROM accessibility_defects WHERE project_name = ?",
+                        (proj_name,)
+                    ).fetchone()["count"]
+                    total_ai = conn.execute(
+                        "SELECT COUNT(*) as count FROM ai_issues WHERE project_name = ? AND phase = 'file_analysis'",
+                        (proj_name,)
+                    ).fetchone()["count"]
+                    total_issues = total_eslint + total_accessibility + total_ai
+                    
+                    display_name = proj_name if proj_name else PROJECT_ROOT.name
+                    recent_audits.append({
+                        "project_name": display_name,
+                        "started_at": None,
+                        "status": "completed",
+                        "completed_at": None,
+                        "total_files": total_files,
+                        "total_issues": total_issues
+                    })
+                    
+        conn.close()
+        return jsonify(recent_audits)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/summary", methods=["GET"])
 def get_summary():
     """

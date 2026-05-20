@@ -17,13 +17,13 @@
     <!-- Main Content -->
     <div class="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 flex-1 min-h-0">
       <!-- Left Panel: Recent Audits -->
-      <div class="flex flex-col overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm rounded-xl transition-all duration-300 hover:border-gray-300 dark:hover:border-gray-700">
-        <div class="flex items-center justify-between py-5 px-6 border-b border-gray-100 dark:border-gray-800/50">
+      <div class="flex flex-col h-[400px] lg:h-full min-h-0 overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm rounded-xl transition-all duration-300 hover:border-gray-300 dark:hover:border-gray-700">
+        <div class="flex items-center justify-between py-5 px-6 border-b border-gray-100 dark:border-gray-800/50 shrink-0">
           <h3 class="text-[14px] font-bold m-0 tracking-[-0.01em] text-gray-800 dark:text-gray-100">Recent Audits</h3>
           <span class="font-mono text-[10px] py-0.5 px-2 bg-blue-500/10 border border-blue-500/20 rounded-md text-blue-600 dark:text-blue-400 font-bold">{{ recentAudits.length }}</span>
         </div>
 
-        <div v-if="loading" class="flex flex-col gap-2.5 p-4">
+        <div v-if="loading" class="flex flex-col gap-2.5 p-4 shrink-0">
           <div v-for="i in 3" :key="i" class="h-20 bg-gradient-to-r from-slate-400/10 to-slate-400/5 rounded-lg animate-pulse"></div>
         </div>
 
@@ -77,8 +77,8 @@
       </div>
 
       <!-- Right Panel: Quick Start -->
-      <div class="flex flex-col overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm rounded-xl transition-all duration-300 hover:border-gray-300 dark:hover:border-gray-700">
-        <div class="flex items-center justify-between py-5 px-6 border-b border-gray-100 dark:border-gray-800/50">
+      <div class="flex flex-col h-full overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm rounded-xl transition-all duration-300 hover:border-gray-300 dark:hover:border-gray-700">
+        <div class="flex items-center justify-between py-5 px-6 border-b border-gray-100 dark:border-gray-800/50 shrink-0">
           <h3 class="text-[14px] font-bold m-0 tracking-[-0.01em] text-gray-800 dark:text-gray-100">Quick Start</h3>
         </div>
 
@@ -144,26 +144,26 @@
           </div>
 
           <!-- Feature Cards -->
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-2">
-            <div class="flex items-center gap-2.5 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-lg transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+          <div class="flex flex-wrap gap-2.5 mt-2">
+            <div class="flex-1 min-w-[180px] flex items-center gap-2.5 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-lg transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
               <div class="w-9 h-9 rounded-lg flex items-center justify-center text-[11px] font-black tracking-[0.05em] bg-blue-500/15 border border-blue-500/20 text-blue-400 shrink-0">AI</div>
-              <div>
-                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5 m-0">AI Analysis</p>
-                <p class="text-[12px] text-gray-500 dark:text-gray-400 m-0">Deep code intelligence</p>
+              <div class="min-w-0">
+                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5 m-0 leading-tight">AI Analysis</p>
+                <p class="text-[12px] text-gray-500 dark:text-gray-400 m-0 leading-tight">Deep code intelligence</p>
               </div>
             </div>
-            <div class="flex items-center gap-2.5 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-lg transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+            <div class="flex-1 min-w-[180px] flex items-center gap-2.5 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-lg transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
               <div class="w-9 h-9 rounded-lg flex items-center justify-center text-[11px] font-black tracking-[0.05em] bg-emerald-500/15 border border-emerald-500/20 text-emerald-500 shrink-0">ES</div>
-              <div>
-                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5 m-0">ESLint Scan</p>
-                <p class="text-[12px] text-gray-500 dark:text-gray-400 m-0">Standards enforcement</p>
+              <div class="min-w-0">
+                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5 m-0 leading-tight">ESLint Scan</p>
+                <p class="text-[12px] text-gray-500 dark:text-gray-400 m-0 leading-tight">Standards enforcement</p>
               </div>
             </div>
-            <div class="flex items-center gap-2.5 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-lg transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+            <div class="flex-1 min-w-[180px] flex items-center gap-2.5 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-lg transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
               <div class="w-9 h-9 rounded-lg flex items-center justify-center text-[11px] font-black tracking-[0.05em] bg-amber-500/15 border border-amber-500/20 text-amber-500 shrink-0">A11</div>
-              <div>
-                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5 m-0">Accessibility</p>
-                <p class="text-[12px] text-gray-500 dark:text-gray-400 m-0">WCAG compliance</p>
+              <div class="min-w-0">
+                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 mb-0.5 m-0 leading-tight">Accessibility</p>
+                <p class="text-[12px] text-gray-500 dark:text-gray-400 m-0 leading-tight">WCAG compliance</p>
               </div>
             </div>
           </div>
@@ -176,6 +176,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { filesAPI } from '../api.js'
 
 const router = useRouter()
 const loading = ref(false)
@@ -194,17 +195,13 @@ const handleFolderSelect = (e) => {
   }
 }
 
-const mockRecentAudits = [
-  { project_name: 'MyProject v1.0', started_at: '2024-01-15T14:32:00', status: 'completed', total_files: 42, total_issues: 128 },
-  { project_name: 'WebApp v2.1', started_at: '2024-01-10T09:15:00', status: 'completed', total_files: 156, total_issues: 342 },
-]
-
 const fetchRecentAudits = async () => {
   loading.value = true
   try {
-    await new Promise(r => setTimeout(r, 400))
-    recentAudits.value = mockRecentAudits
+    const res = await filesAPI.getRecentAudits()
+    recentAudits.value = res.data || []
   } catch (err) {
+    console.error('Error fetching recent audits:', err)
     recentAudits.value = []
   } finally {
     loading.value = false
@@ -212,8 +209,21 @@ const fetchRecentAudits = async () => {
 }
 
 const formatDate = (d) => {
-  if (!d) return ''
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  if (!d) return 'N/A'
+  let dateStr = d
+  if (typeof d === 'string') {
+    // Append 'Z' to treat ISO datetimes from backend as UTC if they lack a timezone suffix
+    if (!d.endsWith('Z') && !/\+\d{2}:?\d{2}$/.test(d)) {
+      dateStr = d.includes('T') ? d + 'Z' : d.replace(' ', 'T') + 'Z'
+    }
+  }
+  try {
+    const date = new Date(dateStr)
+    if (isNaN(date.getTime())) return d
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  } catch (err) {
+    return d
+  }
 }
 
 const getStatusText = (s) => ({ completed: 'Completed', in_progress: 'Running', failed: 'Failed' }[s] || 'Unknown')

@@ -42,6 +42,9 @@ api.interceptors.response.use(
 
 // API endpoints
 export const filesAPI = {
+  // Get recent audits
+  getRecentAudits: () => api.get('/recent-audits'),
+
   // Get all files
   getFiles: () => api.get('/files'),
   
