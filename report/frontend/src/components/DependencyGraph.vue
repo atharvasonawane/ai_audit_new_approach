@@ -90,9 +90,14 @@
     <div v-show="viewMode === 'graph'" class="flex-1 flex flex-row border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
       
       <!-- Stage 7: Side Panel -->
-      <div class="w-[240px] shrink-0 border-r border-gray-200 dark:border-gray-800 flex flex-col z-20 bg-white dark:bg-gray-950 shadow-[4px_0_12px_rgba(0,0,0,0.02)]">
-        <div class="p-3 border-b border-gray-200 dark:border-gray-800 flex flex-col gap-2 shrink-0">
-           <div class="text-xs font-bold text-gray-800 dark:text-gray-200 uppercase tracking-wider">Files</div>
+      <div v-show="!isSidebarCollapsed" class="shrink-0 border-r border-gray-200 dark:border-gray-800 flex flex-col z-20 bg-white dark:bg-gray-950 shadow-[4px_0_12px_rgba(0,0,0,0.02)]" :style="{ width: paneWidth + 'px' }">
+        <div class="p-3 border-b border-gray-200 dark:border-gray-800 flex flex-col gap-2 shrink-0 relative">
+           <div class="flex items-center justify-between">
+             <div class="text-xs font-bold text-gray-800 dark:text-gray-200 uppercase tracking-wider">Files</div>
+             <button @click="isSidebarCollapsed = true" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-500 dark:text-gray-400 transition-colors" title="Collapse Sidebar">
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+             </button>
+           </div>
            <select v-model="sortOption" class="text-xs border rounded p-1.5 outline-none focus:ring-2 focus:ring-indigo-500/50 bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-700 text-gray-800 dark:text-gray-200 cursor-pointer">
              <option value="impact">Sort by Impact</option>
              <option value="in_degree">Sort by In-degree</option>
@@ -118,35 +123,49 @@
         </div>
       </div>
 
+      <!-- Resizer -->
+      <div v-show="!isSidebarCollapsed" class="w-1 cursor-col-resize bg-gray-200 dark:bg-gray-800 hover:bg-indigo-400 dark:hover:bg-indigo-500 active:bg-indigo-600 transition-colors shrink-0 z-30" @mousedown="startDrag"></div>
+
       <!-- Graph Wrapper -->
       <div class="flex-1 relative w-full h-full overflow-hidden" ref="graphWrapper">
         
-        <!-- Topology Stats Bar -->
-        <div v-show="viewMode === 'graph' && !focusedNode" class="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border border-gray-200 dark:border-gray-700 rounded-full shadow-sm px-3 py-1.5 text-[11px] font-semibold text-gray-700 dark:text-gray-300 transition-all">
-          <span class="px-2 border-r border-gray-300 dark:border-gray-600">Total: {{ topologyStats.total }}</span>
-          
-          <button @click.stop="toggleTopologyFilter('entryPoints')" 
-                  class="px-2 py-0.5 transition-colors rounded-full font-bold" 
-                  :class="activeTopologyFilter === 'entryPoints' ? 'bg-indigo-600 text-white dark:bg-indigo-500' : 'hover:text-indigo-600 dark:hover:text-indigo-400'">
-            Entry Points: {{ topologyStats.entryPoints }}
+        <!-- Uncollapse Button -->
+        <button v-show="isSidebarCollapsed" @click="isSidebarCollapsed = false" class="absolute left-0 top-1/2 -translate-y-1/2 z-40 bg-white/95 dark:bg-gray-900/95 border border-gray-200 dark:border-gray-700 border-l-0 rounded-r-md p-1.5 shadow-sm text-gray-600 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800 backdrop-blur-md transition-colors" title="Expand Sidebar">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+        
+        <!-- Topology Stats Card (vertical, top-left) -->
+        <div v-show="viewMode === 'graph' && !focusedNode"
+             class="absolute top-4 left-4 z-30 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border border-gray-200 dark:border-gray-700 rounded-xl shadow-md overflow-hidden"
+             style="min-width: 130px;">
+          <!-- Total header -->
+          <div class="px-3 py-2 border-b border-gray-200 dark:border-gray-700 text-[11px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+            Total: <span class="text-gray-900 dark:text-gray-100">{{ topologyStats.total }}</span>
+          </div>
+          <!-- Stat rows -->
+          <button @click.stop="toggleTopologyFilter('entryPoints')"
+                  class="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold transition-colors border-b border-gray-100 dark:border-gray-800"
+                  :class="activeTopologyFilter === 'entryPoints' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-700 dark:hover:text-indigo-300'">
+            <span>Entry Points</span>
+            <span class="ml-3 font-bold text-[13px]">{{ topologyStats.entryPoints }}</span>
           </button>
-          
-          <button @click.stop="toggleTopologyFilter('hubs')" 
-                  class="px-2 py-0.5 border-l border-gray-300 dark:border-gray-600 transition-colors rounded-full font-bold" 
-                  :class="activeTopologyFilter === 'hubs' ? 'bg-orange-600 text-white dark:bg-orange-500 border-l-transparent' : 'hover:text-orange-600 dark:hover:text-orange-400'">
-            Hubs: {{ topologyStats.hubs }}
+          <button @click.stop="toggleTopologyFilter('hubs')"
+                  class="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold transition-colors border-b border-gray-100 dark:border-gray-800"
+                  :class="activeTopologyFilter === 'hubs' ? 'bg-orange-500 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-orange-50 dark:hover:bg-orange-900/30 hover:text-orange-700 dark:hover:text-orange-300'">
+            <span>Hubs</span>
+            <span class="ml-3 font-bold text-[13px]">{{ topologyStats.hubs }}</span>
           </button>
-          
-          <button @click.stop="toggleTopologyFilter('leaves')" 
-                  class="px-2 py-0.5 border-l border-gray-300 dark:border-gray-600 transition-colors rounded-full font-bold" 
-                  :class="activeTopologyFilter === 'leaves' ? 'bg-teal-600 text-white dark:bg-teal-500 border-l-transparent' : 'hover:text-teal-600 dark:hover:text-teal-400'">
-            Leaves: {{ topologyStats.leaves }}
+          <button @click.stop="toggleTopologyFilter('leaves')"
+                  class="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold transition-colors border-b border-gray-100 dark:border-gray-800"
+                  :class="activeTopologyFilter === 'leaves' ? 'bg-teal-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-teal-50 dark:hover:bg-teal-900/30 hover:text-teal-700 dark:hover:text-teal-300'">
+            <span>Leaves</span>
+            <span class="ml-3 font-bold text-[13px]">{{ topologyStats.leaves }}</span>
           </button>
-          
-          <button @click.stop="toggleTopologyFilter('orphans')" 
-                  class="px-2 py-0.5 border-l border-gray-300 dark:border-gray-600 transition-colors rounded-full font-bold" 
-                  :class="activeTopologyFilter === 'orphans' ? 'bg-yellow-500 text-white dark:bg-yellow-500 border-l-transparent' : 'hover:text-yellow-600 dark:hover:text-yellow-400'">
-            Orphans: {{ topologyStats.orphans }}
+          <button @click.stop="toggleTopologyFilter('orphans')"
+                  class="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold transition-colors"
+                  :class="activeTopologyFilter === 'orphans' ? 'bg-yellow-500 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-yellow-50 dark:hover:bg-yellow-900/30 hover:text-yellow-700 dark:hover:text-yellow-300'">
+            <span>Orphans</span>
+            <span class="ml-3 font-bold text-[13px]">{{ topologyStats.orphans }}</span>
           </button>
         </div>
 
@@ -255,6 +274,39 @@ const layoutMode = ref('force')
 const focusedNode = ref(null)
 const sortOption = ref('impact')
 const reactiveNodes = shallowRef([])
+
+const paneWidth = ref(240)
+const isDragging = ref(false)
+const isSidebarCollapsed = ref(false)
+
+const startDrag = () => {
+  isDragging.value = true
+  document.addEventListener('mousemove', onDrag)
+  document.addEventListener('mouseup', stopDrag)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+const onDrag = (e) => {
+  if (isDragging.value) {
+    const container = graphWrapper.value ? graphWrapper.value.parentElement : null
+    if (container) {
+      const rect = container.getBoundingClientRect()
+      let newWidth = e.clientX - rect.left
+      if (newWidth < 180) newWidth = 180
+      if (newWidth > 500) newWidth = 500
+      paneWidth.value = newWidth
+    }
+  }
+}
+
+const stopDrag = () => {
+  isDragging.value = false
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', stopDrag)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
 
 const sortedNodes = computed(() => {
   let list = [...reactiveNodes.value]

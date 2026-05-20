@@ -1,7 +1,7 @@
 <template>
   <div class="flex h-full overflow-hidden explorer">
     <!-- Left: File Pane -->
-    <div class="bg-gray-50 dark:bg-gray-900 flex flex-col overflow-hidden" :style="{ width: paneWidth + 'px', minWidth: paneWidth + 'px' }">
+    <div v-show="!isExplorerCollapsed" class="bg-gray-50 dark:bg-gray-900 flex flex-col overflow-hidden" :style="{ width: paneWidth + 'px', minWidth: paneWidth + 'px' }">
       <!-- Header with Search -->
       <div class="flex items-center gap-2.5 p-3 border-b border-gray-200 dark:border-gray-800 shrink-0">
         <div class="relative flex-1">
@@ -16,8 +16,13 @@
             class="w-full py-2 pr-3 pl-8 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-[13px] outline-none transition-all duration-200 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-400/40 focus:bg-blue-500/10 focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 caret-gray-900 dark:caret-white"
           />
         </div>
-        <div class="font-mono text-[11px] py-1 px-2 bg-slate-500/15 border border-slate-400/10 rounded-md text-gray-600 dark:text-gray-400 shrink-0 font-semibold">
-          {{ filteredFiles.length }}
+        <div class="flex items-center gap-1">
+          <div class="font-mono text-[11px] py-1 px-2 bg-slate-500/15 border border-slate-400/10 rounded-md text-gray-600 dark:text-gray-400 shrink-0 font-semibold" title="Total Files">
+            {{ filteredFiles.length }}
+          </div>
+          <button @click="isExplorerCollapsed = true" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-500 dark:text-gray-400 transition-colors" title="Collapse Explorer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
         </div>
       </div>
 
@@ -77,10 +82,16 @@
     </div>
 
     <!-- Resizer -->
-    <div class="w-1 cursor-col-resize bg-gray-200 dark:bg-white/10 hover:bg-gray-300 dark:hover:bg-gray-600 active:bg-gray-400 dark:active:bg-gray-500 transition-colors shrink-0 z-10" @mousedown="startDrag"></div>
+    <div v-show="!isExplorerCollapsed" class="w-1 cursor-col-resize bg-gray-200 dark:bg-white/10 hover:bg-gray-300 dark:hover:bg-gray-600 active:bg-gray-400 dark:active:bg-gray-500 transition-colors shrink-0 z-10" @mousedown="startDrag"></div>
 
     <!-- Right: Detail Pane -->
-    <div class="flex-1 overflow-hidden bg-white dark:bg-gray-950">
+    <div class="flex-1 relative overflow-hidden bg-white dark:bg-gray-950">
+      
+      <!-- Uncollapse Button -->
+      <button v-show="isExplorerCollapsed" @click="isExplorerCollapsed = false" class="absolute left-0 top-1/2 -translate-y-1/2 z-40 bg-white/95 dark:bg-gray-900/95 border border-gray-200 dark:border-gray-700 border-l-0 rounded-r-md p-1.5 shadow-sm text-gray-600 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800 backdrop-blur-md transition-colors" title="Expand Explorer">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+
       <FileDetailView v-if="selectedFilePath" :filePath="selectedFilePath" />
       <div v-else class="h-full flex flex-col items-center justify-center gap-5 p-10 text-center">
         <div class="flex flex-col items-center gap-4">
@@ -115,6 +126,7 @@ const selectedFilePath = ref(null)
 
 const paneWidth = ref(280)
 const isDragging = ref(false)
+const isExplorerCollapsed = ref(false)
 
 const startDrag = () => {
   isDragging.value = true
