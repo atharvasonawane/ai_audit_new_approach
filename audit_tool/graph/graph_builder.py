@@ -4,7 +4,7 @@ import logging
 
 logger = logging.getLogger("graph_builder")
 
-def build_graph(project_name: str, db_path: str) -> nx.DiGraph:
+def build_graph(run_id: int, project_name: str, db_path: str) -> nx.DiGraph:
     """
     Reads component_relationships from SQLite and builds a networkx.DiGraph.
     Every node is a file path string.
@@ -17,8 +17,8 @@ def build_graph(project_name: str, db_path: str) -> nx.DiGraph:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT parent_file, child_file, relationship_type FROM component_relationships WHERE project_name = ?",
-            (project_name,)
+            "SELECT parent_file, child_file, relationship_type FROM component_relationships WHERE run_id = ?",
+            (run_id,)
         ).fetchall()
         
         for row in rows:

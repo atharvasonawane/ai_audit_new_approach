@@ -288,10 +288,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { filesAPI } from '../api.js'
 
+const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const error = ref(null)
@@ -317,9 +318,10 @@ const getCategoryPercentage = (val) => {
 
 const fetchDashboardData = async () => {
   loading.value = true; error.value = null
+  const runId = route.query.run_id
   try {
     const [summaryRes, executiveRes, offendersRes] = await Promise.all([
-      filesAPI.getSummary(), filesAPI.getExecutiveSummary(), filesAPI.getWorstOffenders(10)
+      filesAPI.getSummary(runId), filesAPI.getExecutiveSummary(runId), filesAPI.getWorstOffenders(10, runId)
     ])
     summary.value = summaryRes.data || {}
     executiveSummary.value = executiveRes.data || {}
@@ -335,7 +337,15 @@ const fetchDashboardData = async () => {
 }
 
 const getFileName = (p) => p ? p.split('/').pop() : ''
-const navigateToFile = (p) => router.push({ path: '/audit', query: { file: p } })
+const navigateToFile = (p) => {
+  const q = { file: p }
+  if (route.query.run_id) q.run_id = route.query.run_id
+  router.push({ path: '/audit', query: q })
+}
 
 onMounted(fetchDashboardData)
+
+watch(() => route.query.run_id, () => {
+  fetchDashboardData()
+})
 </script>

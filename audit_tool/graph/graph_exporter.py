@@ -6,7 +6,7 @@ import networkx as nx
 
 logger = logging.getLogger("graph_exporter")
 
-def export_graph(G: nx.DiGraph, metrics: dict, project_name: str, db_path: str, frontend_public_dir: str):
+def export_graph(run_id: int, G: nx.DiGraph, metrics: dict, project_name: str, db_path: str, frontend_public_dir: str):
     logger.info("Exporting dependency graph metrics to SQLite...")
     
     try:
@@ -16,6 +16,7 @@ def export_graph(G: nx.DiGraph, metrics: dict, project_name: str, db_path: str, 
         records = []
         for node, data in metrics.items():
             records.append((
+                run_id,
                 project_name,
                 node,
                 data["in_degree"],
@@ -31,10 +32,10 @@ def export_graph(G: nx.DiGraph, metrics: dict, project_name: str, db_path: str, 
             
         conn.executemany("""
             INSERT INTO dependency_metrics (
-                project_name, file_path, in_degree, out_degree, depth, impact_score, 
+                run_id, project_name, file_path, in_degree, out_degree, depth, impact_score, 
                 node_category, is_in_cycle, cycle_members, dependents, dependencies
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(project_name, file_path) DO UPDATE SET
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id, project_name, file_path) DO UPDATE SET
                 in_degree=excluded.in_degree,
                 out_degree=excluded.out_degree,
                 depth=excluded.depth,

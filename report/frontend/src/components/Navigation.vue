@@ -73,7 +73,7 @@ const pageTitle = computed(() => {
 
 const onSearch = () => {
   if (route.path !== '/audit') {
-    router.push('/audit')
+    router.push({ path: '/audit', query: route.query.run_id ? { run_id: route.query.run_id } : {} })
   }
 }
 

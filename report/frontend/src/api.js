@@ -40,47 +40,52 @@ api.interceptors.response.use(
   }
 )
 
+// Helper to append run_id query param
+const getRunQuery = (url, runId) => {
+  if (!runId) return url
+  return url.includes('?') ? `${url}&run_id=${runId}` : `${url}?run_id=${runId}`
+}
+
 // API endpoints
 export const filesAPI = {
   // Get recent audits
   getRecentAudits: () => api.get('/recent-audits'),
 
   // Get all files
-  getFiles: () => api.get('/files'),
+  getFiles: (runId) => api.get(getRunQuery('/files', runId)),
   
   // Get file metrics
-  getFileMetrics: (filePath) => api.get(`/file-metrics/${filePath}`),
+  getFileMetrics: (filePath, runId) => api.get(getRunQuery(`/file-metrics/${filePath}`, runId)),
   
   // Get file AI issues
-  getFileAIIssues: (filePath) => api.get(`/file-ai-issues/${filePath}`),
+  getFileAIIssues: (filePath, runId) => api.get(getRunQuery(`/file-ai-issues/${filePath}`, runId)),
   
   // Get file ESLint flags
-  getFileESLint: (filePath) => api.get(`/file-eslint/${filePath}`),
+  getFileESLint: (filePath, runId) => api.get(getRunQuery(`/file-eslint/${filePath}`, runId)),
   
   // Get file accessibility defects
-  getFileAccessibility: (filePath) => api.get(`/file-accessibility/${filePath}`),
+  getFileAccessibility: (filePath, runId) => api.get(getRunQuery(`/file-accessibility/${filePath}`, runId)),
   
   // Get file API calls
-  getFileAPICalls: (filePath) => api.get(`/file-api-calls/${filePath}`),
+  getFileAPICalls: (filePath, runId) => api.get(getRunQuery(`/file-api-calls/${filePath}`, runId)),
   
   // Get project summary
-  getSummary: () => api.get('/summary'),
+  getSummary: (runId) => api.get(getRunQuery('/summary', runId)),
   
   // Get executive summary
-  getExecutiveSummary: () => api.get('/executive-summary'),
+  getExecutiveSummary: (runId) => api.get(getRunQuery('/executive-summary', runId)),
   
   // Get worst offenders
-  getWorstOffenders: (limit = 10) => api.get(`/worst-offenders?limit=${limit}`),
+  getWorstOffenders: (limit = 10, runId) => api.get(getRunQuery(`/worst-offenders?limit=${limit}`, runId)),
   
   // Get dependency summary
-  getDependencySummary: () => api.get('/dependency-summary'),
+  getDependencySummary: (runId) => api.get(getRunQuery('/dependency-summary', runId)),
   
   // Get full dependency graph
-  getDependencyGraph: () => api.get('/dependency-graph'),
+  getDependencyGraph: (runId) => api.get(getRunQuery('/dependency-graph', runId)),
 
-  // Get dependency data for a specific file (imports, dependents, impact, cycle)
-  getFileDependencies: (filePath) => api.get(`/file-dependencies/${filePath}`),
-
+  // Get dependency data for a specific file
+  getFileDependencies: (filePath, runId) => api.get(getRunQuery(`/file-dependencies/${filePath}`, runId)),
 }
 
 export default api

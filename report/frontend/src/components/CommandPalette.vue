@@ -55,9 +55,10 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { filesAPI } from '../api.js'
 
+const route = useRoute()
 const router = useRouter()
 const isOpen = ref(false)
 const query = ref('')
@@ -112,7 +113,14 @@ const close = () => {
 }
 
 const select = (item) => {
-  router.push(item.route)
+  if (typeof item.route === 'string') {
+    const url = new URL(item.route, 'http://localhost')
+    const q = Object.fromEntries(url.searchParams.entries())
+    if (route.query.run_id) q.run_id = route.query.run_id
+    router.push({ path: url.pathname, query: q })
+  } else {
+    router.push(item.route)
+  }
   close()
 }
 

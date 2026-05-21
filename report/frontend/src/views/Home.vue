@@ -42,7 +42,7 @@
             v-for="(audit, i) in recentAudits"
             :key="i"
             class="p-4 bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-xl cursor-pointer transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-800/80"
-            @click="navigateToDashboard"
+            @click="navigateToDashboard(audit.id)"
           >
             <div class="flex items-center justify-between mb-2 gap-2">
               <span class="text-[14px] font-bold tracking-[-0.01em] text-gray-900 dark:text-gray-100">{{ audit.project_name || 'Code Audit' }}</span>
@@ -227,7 +227,13 @@ const formatDate = (d) => {
 }
 
 const getStatusText = (s) => ({ completed: 'Completed', in_progress: 'Running', failed: 'Failed' }[s] || 'Unknown')
-const navigateToDashboard = () => router.push('/dashboard')
+const navigateToDashboard = (runId) => {
+  if (runId) {
+    router.push({ path: '/dashboard', query: { run_id: runId } })
+  } else {
+    router.push('/dashboard')
+  }
+}
 const startAnalysis = () => {
   pathError.value = ''
   if (!projectPath.value) { pathError.value = 'Please enter a project directory path'; return }

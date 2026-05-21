@@ -103,9 +103,10 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { filesAPI } from '../api.js'
 
+const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const error = ref(null)
@@ -191,7 +192,9 @@ const formatCategory = (cat) => ({
 }[cat] || cat)
 
 const navigateToFile = (filePath) => {
-  router.push({ path: '/audit', query: { file: filePath } })
+  const q = { file: filePath }
+  if (route.query.run_id) q.run_id = route.query.run_id
+  router.push({ path: '/audit', query: q })
 }
 
 onMounted(async () => {

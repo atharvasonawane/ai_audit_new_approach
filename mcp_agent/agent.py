@@ -24,7 +24,7 @@ if load_dotenv:
     load_dotenv(PROJECT_ROOT / ".env")
 
 from db.db_init import DEFAULT_DB_PATH
-from db.db_writer import upsert_ai_issue
+from db.db_writer import insert_ai_issues_bulk
 
 try:
     from mcp.client.session import ClientSession
@@ -402,21 +402,13 @@ def _fetch_executive_synthesis_context(
     }
 
 
-async def generate_executive_synthesis(project_name: str) -> None:
+async def generate_executive_synthesis(run_id: int, project_name: str) -> None:
     """
     Phase 3 — Executive synthesis: macro context from SQLite, one LLM call (plain text),
     persist to audit_runs.synthesis_text and mark run completed.
     """
     cfg = _load_config()
     db_path = Path(cfg.get("db", {}).get("path", DEFAULT_DB_PATH))
-    run_id = _fetch_in_progress_run_id(db_path, project_name)
-    if run_id is None:
-        logger.warning(
-            "generate_executive_synthesis: no in_progress audit_run for project %s",
-            project_name,
-        )
-        return
-
     ctx = _fetch_executive_synthesis_context(db_path, project_name)
     if ctx["total_files"] == 0:
         _finalize_audit_run_with_synthesis(
@@ -527,6 +519,7 @@ def _split_complex_simple(
 
 
 def _validate_and_write_issues_for_file(
+    run_id: int,
     file_path: str,
     issues: List[Any],
     base_path: Optional[str],
@@ -610,8 +603,9 @@ def _validate_and_write_issues_for_file(
             "created_at": created_at,
         }
 
-        upsert_ai_issue(record, db_path=db_path)
         results.append(record)
+
+    insert_ai_issues_bulk(run_id, results, db_path=db_path)
 
     print(f"Wrote {len(results)} issues to database")
     return results
@@ -1098,7 +1092,7 @@ async def _run_full_codebase_async(
                 continue
 
             _validate_and_write_issues_for_file(
-                fp, issues, base_path, project_name, db_path
+                run_id, fp, issues, base_path, project_name, db_path
             )
             _update_run_last_file(db_path, run_id, fp)
 
@@ -1151,12 +1145,12 @@ async def _run_full_codebase_async(
             for fp in batch_to_run:
                 file_issues = by_file.get(fp, [])
                 _validate_and_write_issues_for_file(
-                    fp, file_issues, base_path, project_name, db_path
+                    run_id, fp, file_issues, base_path, project_name, db_path
                 )
                 _update_run_last_file(db_path, run_id, fp)
 
 
-def analyze_single_file(file_path: str) -> List[Dict[str, Any]]:
+def analyze_single_file(file_path: str, run_id: int = 1) -> List[Dict[str, Any]]:
     cfg = _load_config()
     base_path = cfg.get("base_path")
     project_name = cfg.get("project_name", "default")
@@ -1192,13 +1186,13 @@ def analyze_single_file(file_path: str) -> List[Dict[str, Any]]:
                 return []
 
             return _validate_and_write_issues_for_file(
-                file_path, issues, base_path, project_name, db_path
+                run_id, file_path, issues, base_path, project_name, db_path
             )
 
     return asyncio.run(_run())
 
 
-def analyze_file_batch(file_paths: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+def analyze_file_batch(file_paths: List[str], run_id: int = 1) -> Dict[str, List[Dict[str, Any]]]:
     """
     Analyze up to 8 (or fewer) files in one LLM call. Returns written records per file_path.
     """
@@ -1246,17 +1240,17 @@ def analyze_file_batch(file_paths: List[str]) -> Dict[str, List[Dict[str, Any]]]
             out: Dict[str, List[Dict[str, Any]]] = {}
             for fp in file_paths:
                 out[fp] = _validate_and_write_issues_for_file(
-                    fp, by_file.get(fp, []), base_path, project_name, db_path
+                    run_id, fp, by_file.get(fp, []), base_path, project_name, db_path
                 )
             return out
 
     return asyncio.run(_run())
 
 
-def run_full_codebase_audit() -> int:
+def run_full_codebase_audit(run_id: int) -> int:
     """
     Process all vue_files for the configured project: complex files one-by-one,
-    simple files in batches. Handles crash recovery via audit_runs + ai_issues.
+    simple files in batches.
     Returns audit run id.
     """
     cfg = _load_config()
@@ -1264,33 +1258,17 @@ def run_full_codebase_audit() -> int:
     project_name = cfg.get("project_name", "default")
     db_path = Path(cfg.get("db", {}).get("path", DEFAULT_DB_PATH))
 
-    interrupted = _fetch_in_progress_run(db_path, project_name)
+    # Determine files to skip if run was resumed
     skip_files: Set[str] = set()
-    run_id: int
-
-    if interrupted:
-        choice = input("Found interrupted run. Resume? (y/n): ").strip().lower()
-        if choice == "y":
-            run_id = int(interrupted["id"])
-            skip_files = _fetch_files_done_for_run(
-                db_path, project_name, interrupted["started_at"]
-            )
-            print(
-                f"[AI Agent] Resuming run {run_id}; "
-                f"skipping {len(skip_files)} file(s) already recorded for this run."
-            )
-        else:
-            _mark_run_failed(db_path, int(interrupted["id"]))
-            run_id = _insert_audit_run_in_progress(db_path, project_name)
-            print(f"[AI Agent] Started new audit run id={run_id}.")
-    else:
-        run_id = _insert_audit_run_in_progress(db_path, project_name)
-        print(f"[AI Agent] Started audit run id={run_id}.")
-
+    row = _fetch_in_progress_run(db_path, project_name)
+    if row and row["id"] == run_id:
+        skip_files = _fetch_files_done_for_run(db_path, project_name, row["started_at"])
+        print(f"[AI Agent] Resuming run {run_id}; skipping {len(skip_files)} file(s) already recorded.")
+    
     paths_rows = _fetch_vue_files_with_script_lines(db_path, project_name)
     if not paths_rows:
         print("[AI Agent] No files in vue_files for this project.")
-        asyncio.run(generate_executive_synthesis(project_name))
+        asyncio.run(generate_executive_synthesis(run_id, project_name))
         return run_id
 
     complex_files, simple_files = _split_complex_simple(paths_rows)
@@ -1326,7 +1304,7 @@ def run_full_codebase_audit() -> int:
             project_name,
             db_path,
         )
-        await generate_executive_synthesis(project_name)
+        await generate_executive_synthesis(run_id, project_name)
 
     try:
         asyncio.run(_pipeline())
@@ -1346,7 +1324,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     try:
-        run_full_codebase_audit()
+        run_full_codebase_audit(1)
     except Exception as e:
         print(f"\n✗ Analysis failed: {e}")
         import traceback

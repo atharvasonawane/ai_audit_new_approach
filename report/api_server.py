@@ -199,6 +199,29 @@ def _extract_snippet(file_path: str, line_number: int) -> str:
         return f"[Error reading file: {e}]"
 
 
+def _get_run_id(conn: sqlite3.Connection, project_name: str) -> Optional[int]:
+    """Resolve run_id from query param or fall back to most recent completed run."""
+    run_id_param = request.args.get("run_id")
+    if run_id_param and str(run_id_param).isdigit():
+        return int(run_id_param)
+
+    # Fall back: most recent completed run globally (not filtered by project_name,
+    # since the config project_name can change between runs)
+    row = conn.execute(
+        "SELECT id FROM audit_runs WHERE status = 'completed' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if row:
+        return row["id"]
+
+    # Last resort: any run
+    row = conn.execute(
+        "SELECT id FROM audit_runs ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if row:
+        return row["id"]
+
+    return None
+
 @app.route("/api/recent-audits", methods=["GET"])
 def get_recent_audits():
     """
@@ -218,37 +241,34 @@ def get_recent_audits():
         recent_audits = []
         for run in runs:
             proj_name = run["project_name"]
+            r_id = run["id"]
             
-            # Count total files
             total_files = conn.execute(
-                "SELECT COUNT(*) as count FROM vue_files WHERE project_name = ?",
-                (proj_name,)
+                "SELECT COUNT(*) as count FROM vue_files WHERE run_id = ?",
+                (r_id,)
             ).fetchone()["count"]
             
-            # Count ESLint flags
             total_eslint = conn.execute(
-                "SELECT COALESCE(SUM(eslint_flag_count), 0) as count FROM vue_files WHERE project_name = ?",
-                (proj_name,)
+                "SELECT COALESCE(SUM(eslint_flag_count), 0) as count FROM vue_files WHERE run_id = ?",
+                (r_id,)
             ).fetchone()["count"]
             
-            # Count Accessibility defects
             total_accessibility = conn.execute(
-                "SELECT COUNT(*) as count FROM accessibility_defects WHERE project_name = ?",
-                (proj_name,)
+                "SELECT COUNT(*) as count FROM accessibility_defects WHERE run_id = ?",
+                (r_id,)
             ).fetchone()["count"]
             
-            # Count AI issues
             total_ai = conn.execute(
-                "SELECT COUNT(*) as count FROM ai_issues WHERE project_name = ? AND phase = 'file_analysis'",
-                (proj_name,)
+                "SELECT COUNT(*) as count FROM ai_issues WHERE run_id = ? AND phase = 'file_analysis'",
+                (r_id,)
             ).fetchone()["count"]
             
             total_issues = total_eslint + total_accessibility + total_ai
             
-            # Fallback for project name if empty/null
             display_name = proj_name if proj_name else PROJECT_ROOT.name
             
             recent_audits.append({
+                "id": r_id,
                 "project_name": display_name,
                 "started_at": run["started_at"],
                 "status": run["status"],
@@ -256,7 +276,6 @@ def get_recent_audits():
                 "total_files": total_files,
                 "total_issues": total_issues
             })
-            
         # If audit_runs is empty, but vue_files has data
         if not recent_audits:
             # Check if there are files in vue_files
@@ -309,17 +328,20 @@ def get_summary():
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify({"error": "No audit runs found"}), 404
         
         # Total files
         total_files = conn.execute(
-            "SELECT COUNT(*) as count FROM vue_files WHERE project_name = ?",
-            (PROJECT_NAME,)
+            "SELECT COUNT(*) as count FROM vue_files WHERE run_id = ?",
+            (run_id,)
         ).fetchone()["count"]
         
         # Total ESLint flags
         total_eslint = conn.execute(
-            "SELECT COALESCE(SUM(eslint_flag_count), 0) as count FROM vue_files WHERE project_name = ?",
-            (PROJECT_NAME,)
+            "SELECT COALESCE(SUM(eslint_flag_count), 0) as count FROM vue_files WHERE run_id = ?",
+            (run_id,)
         ).fetchone()["count"]
         
         # AI issues by severity
@@ -327,10 +349,10 @@ def get_summary():
             """
             SELECT severity, COUNT(*) as count
             FROM ai_issues
-            WHERE project_name = ? AND phase = 'file_analysis'
+            WHERE run_id = ? AND phase = 'file_analysis'
             GROUP BY severity
             """,
-            (PROJECT_NAME,)
+            (run_id,)
         ).fetchall()
         
         issues_by_severity = {"High": 0, "Medium": 0, "Low": 0}
@@ -344,20 +366,21 @@ def get_summary():
             """
             SELECT AVG(COALESCE(cyclomatic_complexity, 0)) as avg_complexity
             FROM vue_files
-            WHERE project_name = ?
+            WHERE run_id = ?
             """,
-            (PROJECT_NAME,)
+            (run_id,)
         ).fetchone()["avg_complexity"] or 0
         
         # Total accessibility defects
         total_accessibility = conn.execute(
-            "SELECT COUNT(*) as count FROM accessibility_defects WHERE project_name = ?",
-            (PROJECT_NAME,)
+            "SELECT COUNT(*) as count FROM accessibility_defects WHERE run_id = ?",
+            (run_id,)
         ).fetchone()["count"]
         
         conn.close()
         
         return jsonify({
+            "run_id": run_id,
             "project_name": PROJECT_NAME,
             "total_files": total_files,
             "total_eslint_flags": total_eslint,
@@ -381,6 +404,10 @@ def get_worst_offenders():
         limit = request.args.get("limit", 10, type=int)
         
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify([])
+
         rows = conn.execute(
             """
             SELECT
@@ -401,14 +428,14 @@ def get_worst_offenders():
             LEFT JOIN (
                 SELECT file_path, COUNT(*) as cnt
                 FROM ai_issues
-                WHERE project_name = ? AND phase = 'file_analysis'
+                WHERE run_id = ? AND phase = 'file_analysis'
                 GROUP BY file_path
             ) ai ON ai.file_path = vf.file_path
-            WHERE vf.project_name = ?
+            WHERE vf.run_id = ?
             ORDER BY composite_score DESC
             LIMIT ?
             """,
-            (PROJECT_NAME, PROJECT_NAME, limit)
+            (run_id, run_id, limit)
         ).fetchall()
         
         conn.close()
@@ -428,6 +455,10 @@ def get_files():
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify([])
+
         rows = conn.execute(
             """
             SELECT
@@ -444,7 +475,7 @@ def get_files():
             LEFT JOIN (
                 SELECT file_path, COUNT(*) as cnt
                 FROM accessibility_defects
-                WHERE project_name = ?
+                WHERE run_id = ?
                 GROUP BY file_path
             ) acc ON acc.file_path = vf.file_path
             LEFT JOIN (
@@ -455,13 +486,13 @@ def get_files():
                     SUM(CASE WHEN severity = 'Medium' THEN 1 ELSE 0 END) as medium_cnt,
                     SUM(CASE WHEN severity = 'Low' THEN 1 ELSE 0 END) as low_cnt
                 FROM ai_issues
-                WHERE project_name = ? AND phase = 'file_analysis'
+                WHERE run_id = ? AND phase = 'file_analysis'
                 GROUP BY file_path
             ) ai ON ai.file_path = vf.file_path
-            WHERE vf.project_name = ?
+            WHERE vf.run_id = ?
             ORDER BY vf.file_path
             """,
-            (PROJECT_NAME, PROJECT_NAME, PROJECT_NAME)
+            (run_id, run_id, run_id)
         ).fetchall()
         
         conn.close()
@@ -481,12 +512,15 @@ def get_file_metrics(file_path: str):
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify({"error": "No audit runs found"}), 404
         row = conn.execute(
             """
             SELECT * FROM vue_files
-            WHERE project_name = ? AND file_path = ?
+            WHERE run_id = ? AND file_path = ?
             """,
-            (PROJECT_NAME, file_path)
+            (run_id, file_path)
         ).fetchone()
         
         conn.close()
@@ -508,26 +542,31 @@ def get_file_api_calls(file_path: str):
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify([])
+
         rows = conn.execute(
             """
-            SELECT * FROM api_calls
-            WHERE project_name = ? AND file_path = ?
+            SELECT id, file_path, api_type, method_name, endpoint,
+                   in_mounted, in_loop, line_number
+            FROM api_calls
+            WHERE run_id = ? AND file_path = ?
             ORDER BY line_number
             """,
-            (PROJECT_NAME, file_path)
+            (run_id, file_path)
         ).fetchall()
-        
+
         conn.close()
-        
+
         api_calls = []
         for row in rows:
             call = _row_to_dict(row)
-            # Generate code snippet dynamically
             call["code_snippet"] = _extract_snippet(file_path, call.get("line_number", 0))
             api_calls.append(call)
-        
+
         return jsonify(api_calls)
-    
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -540,40 +579,43 @@ def get_file_accessibility(file_path: str):
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify([])
+
         rows = conn.execute(
             """
-            SELECT * FROM accessibility_defects
-            WHERE project_name = ? AND file_path = ?
+            SELECT id, file_path, rule, message, wcag_criterion, wcag_level, line_number, column_number
+            FROM accessibility_defects
+            WHERE run_id = ? AND file_path = ?
             ORDER BY line_number
             """,
-            (PROJECT_NAME, file_path)
+            (run_id, file_path)
         ).fetchall()
-        
+
         conn.close()
-        
+
         defects = []
         for row in rows:
             defect = _row_to_dict(row)
             rule = defect.get("rule", "")
-            
-            # Add WCAG metadata from dictionary
-            metadata = WCAG_METADATA.get(rule, {
-                "criterion": "Unknown",
-                "level": "A",
-                "explanation": "No metadata available for this rule."
-            })
-            
-            defect["wcag_criterion"] = metadata["criterion"]
-            defect["wcag_level"] = metadata["level"]
-            defect["wcag_explanation"] = metadata["explanation"]
-            
-            # Generate code snippet dynamically
+
+            # Enrich with WCAG metadata if not already in DB
+            if not defect.get("wcag_criterion"):
+                metadata = WCAG_METADATA.get(rule, {
+                    "criterion": "Unknown",
+                    "level": "A",
+                    "explanation": "No metadata available for this rule."
+                })
+                defect["wcag_criterion"] = metadata["criterion"]
+                defect["wcag_level"] = metadata["level"]
+                defect["wcag_explanation"] = metadata["explanation"]
+
             defect["code_snippet"] = _extract_snippet(file_path, defect.get("line_number", 0))
-            
             defects.append(defect)
-        
+
         return jsonify(defects)
-    
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -586,26 +628,30 @@ def get_file_eslint(file_path: str):
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify([])
+
         rows = conn.execute(
             """
-            SELECT * FROM file_flags
-            WHERE project_name = ? AND file_path = ? AND category = 'eslint'
-            ORDER BY severity DESC, line_number
+            SELECT id, file_path, category, rule, message, severity, line_number, column_number
+            FROM file_flags
+            WHERE run_id = ? AND file_path = ? AND category = 'eslint'
+            ORDER BY line_number
             """,
-            (PROJECT_NAME, file_path)
+            (run_id, file_path)
         ).fetchall()
-        
+
         conn.close()
-        
+
         flags = []
         for row in rows:
             flag = _row_to_dict(row)
-            # Generate code snippet dynamically
             flag["code_snippet"] = _extract_snippet(file_path, flag.get("line_number", 0))
             flags.append(flag)
-        
+
         return jsonify(flags)
-    
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -618,27 +664,25 @@ def get_file_ai_issues(file_path: str):
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify([])
+
         rows = conn.execute(
             """
-            SELECT * FROM ai_issues
-            WHERE project_name = ? AND file_path = ? AND phase = 'file_analysis'
-            ORDER BY 
-                CASE severity
-                    WHEN 'High' THEN 1
-                    WHEN 'Medium' THEN 2
-                    WHEN 'Low' THEN 3
-                    ELSE 4
-                END,
-                line_number
+            SELECT id, file_path, phase, issue_category, title as issue_title,
+                   description, severity, line_number, code_snippet, recommendation
+            FROM ai_issues
+            WHERE run_id = ? AND file_path = ? AND phase = 'file_analysis'
+            ORDER BY severity DESC, line_number
             """,
-            (PROJECT_NAME, file_path)
+            (run_id, file_path)
         ).fetchall()
-        
+
         conn.close()
-        
-        issues = [_row_to_dict(row) for row in rows]
-        return jsonify(issues)
-    
+
+        return jsonify([_row_to_dict(row) for row in rows])
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -651,27 +695,25 @@ def get_executive_summary():
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify({"error": "No audit runs found"}), 404
+
         row = conn.execute(
-            """
-            SELECT synthesis_text, completed_at
-            FROM audit_runs
-            WHERE project_name = ? AND status = 'completed'
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (PROJECT_NAME,)
+            "SELECT id, project_name, synthesis_text, completed_at FROM audit_runs WHERE id = ?",
+            (run_id,)
         ).fetchone()
-        
+
         conn.close()
-        
+
         if not row or not row["synthesis_text"]:
             return jsonify({
-                "synthesis_text": "No executive summary available. Run the full audit pipeline first.",
+                "synthesis_text": "No executive summary available. Run the full AI audit pipeline first.",
                 "completed_at": None
             })
-        
+
         return jsonify(_row_to_dict(row))
-    
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -684,27 +726,22 @@ def get_run_status():
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify({"status": "no_runs", "message": "No audit runs found."})
+
         row = conn.execute(
-            """
-            SELECT id, project_name, started_at, status, last_completed_file, completed_at
-            FROM audit_runs
-            WHERE project_name = ?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (PROJECT_NAME,)
+            "SELECT id, project_name, status, started_at, completed_at, total_files, last_completed_file FROM audit_runs WHERE id = ?",
+            (run_id,)
         ).fetchone()
-        
+
         conn.close()
-        
+
         if not row:
-            return jsonify({
-                "status": "no_runs",
-                "message": "No audit runs found for this project."
-            })
-        
+            return jsonify({"status": "no_runs", "message": "No audit runs found for this project."})
+
         return jsonify(_row_to_dict(row))
-    
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -746,10 +783,10 @@ def get_dependency_summary():
         return jsonify({"error": str(e)}), 500
 
 
-def get_transitive_dependents(file_path: str) -> list:
+def get_transitive_dependents(run_id: int, file_path: str) -> list:
     """Helper to compute transitive dependents dynamically via BFS on component_relationships"""
     conn = _db_connect()
-    rows = conn.execute("SELECT parent_file, child_file FROM component_relationships WHERE project_name = ?", (PROJECT_NAME,)).fetchall()
+    rows = conn.execute("SELECT parent_file, child_file FROM component_relationships WHERE run_id = ?", (run_id,)).fetchall()
     conn.close()
     
     # build reverse adjacency list (child -> list of parents)
@@ -779,12 +816,15 @@ def get_file_dependencies(file_path: str):
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify({"error": "No audit runs found"}), 404
         row = conn.execute(
             """
-            SELECT * FROM dependency_metrics
-            WHERE project_name = ? AND file_path = ?
+            SELECT * FROM vue_files
+            WHERE run_id = ? AND file_path = ?
             """,
-            (PROJECT_NAME, file_path)
+            (run_id, file_path)
         ).fetchone()
         conn.close()
         
@@ -803,7 +843,7 @@ def get_file_dependencies(file_path: str):
             "is_in_cycle": bool(data["is_in_cycle"]),
             "dependencies": json.loads(data["dependencies"] or "[]"),
             "dependents": json.loads(data["dependents"] or "[]"),
-            "transitive_impact": get_transitive_dependents(data["file_path"]),
+            "transitive_impact": get_transitive_dependents(run_id, data["file_path"]),
             "cycle": json.loads(data["cycle_members"] or "[]") if data["is_in_cycle"] else None
         }
         
@@ -816,22 +856,30 @@ def get_file_dependencies(file_path: str):
 def get_orphans():
     """
     GET /api/orphans
-    Returns list of all orphan nodes with their metadata.
+    Returns list of all files that have no parent component (in_degree = 0, out_degree > 0).
     """
     try:
         conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            return jsonify([])
+
         rows = conn.execute(
             """
-            SELECT file_path, in_degree, out_degree, impact_score, node_category 
-            FROM dependency_metrics 
-            WHERE project_name = ? AND node_category = 'orphan'
+            SELECT file_path, script_lines, template_lines,
+                   COALESCE(eslint_flag_count, 0) as eslint_flag_count
+            FROM vue_files
+            WHERE run_id = ?
+              AND file_path NOT IN (
+                  SELECT DISTINCT child_file FROM component_relationships WHERE run_id = ?
+              )
+            ORDER BY file_path
             """,
-            (PROJECT_NAME,)
+            (run_id, run_id)
         ).fetchall()
         conn.close()
-        
-        orphans = [_row_to_dict(r) for r in rows]
-        return jsonify(orphans)
+
+        return jsonify([_row_to_dict(r) for r in rows])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

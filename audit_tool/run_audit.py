@@ -219,7 +219,7 @@ if not Path(BASE_PATH).exists():
 # ── Imports ───────────────────────────────────────────────────────────────────
 from extractors.orchestrator import scan_all_vue_files
 from db.db_init import init_db
-from db.db_writer import get_all_file_hashes, write_eslint_results, write_scan_result
+from db.db_writer import get_all_file_hashes, write_eslint_results, write_scan_result, create_audit_run, update_audit_run
 from extractors.eslint_extractor import run_eslint_scan, parse_eslint_results
 
 from graph.import_extractor import run_import_extraction
@@ -229,7 +229,7 @@ from graph.graph_exporter import export_graph
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-def _run_scout_phase():
+def _run_scout_phase(run_id: int):
     logger.info("")
     logger.info("=" * 65)
     sqlite_path = Path(cfg.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db"))
@@ -240,13 +240,12 @@ def _run_scout_phase():
     logger.info(f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 65)
 
-    # 1. Setup SQLite schema
-    logger.info("Setting up SQLite schema...")
-    init_db(sqlite_path)
+    # 1. Setup SQLite schema (now done in main)
+    # init_db(sqlite_path)
 
     # 2. Load known file hashes from database into memory for fast lookup
     logger.info("Loading known file hashes from database into memory...")
-    known_hashes = get_all_file_hashes(project_name, sqlite_path)
+    known_hashes = get_all_file_hashes(project_name, run_id, sqlite_path)
     logger.info(
         "Loaded %d known file hashes into memory for incremental auditing",
         len(known_hashes),
@@ -275,7 +274,7 @@ def _run_scout_phase():
             continue
 
         try:
-            write_scan_result(project_name, cfg, result, sqlite_path)
+            write_scan_result(run_id, project_name, cfg, result, sqlite_path)
             written_count += 1
         except Exception as e:
             logger.error("DB write failed for %s: %s", result.get("file", "?"), e)
@@ -298,7 +297,7 @@ def _run_scout_phase():
                 eslint_results = parse_eslint_results()
                 if eslint_results:
                     eslint_counts = write_eslint_results(
-                        project_name, cfg, eslint_results, sqlite_path
+                        run_id, project_name, cfg, eslint_results, sqlite_path
                     )
                     logger.info(
                         "  Written %d ESLint flags to file_flags, %d to accessibility_defects",
@@ -355,9 +354,10 @@ def _run_scout_phase():
     logger.info("")
     logger.info(f"  DB   : sqlite ({len(processed_results)} new/updated rows)")
     logger.info("Scout Phase Complete.")
+    return len(results)
 
 
-def _run_graph_phase():
+def _run_graph_phase(run_id: int):
     logger.info("")
     logger.info("=" * 65)
     logger.info("  Phase 1.5: Dependency Graph")
@@ -366,48 +366,32 @@ def _run_graph_phase():
     frontend_dir = str(PROJECT_ROOT / "report" / "frontend" / "public")
 
     logger.info("Running import extraction...")
-    run_import_extraction(BASE_PATH, project_name, sqlite_path)
+    run_import_extraction(run_id, BASE_PATH, project_name, sqlite_path)
 
     logger.info("Building dependency graph...")
-    G = build_graph(project_name, sqlite_path)
+    G = build_graph(run_id, project_name, sqlite_path)
     
     if G and G.number_of_nodes() > 0:
         logger.info("Analyzing graph metrics...")
         metrics = analyze_graph(G)
         logger.info("Exporting graph data...")
-        export_graph(G, metrics, project_name, sqlite_path, frontend_dir)
+        export_graph(run_id, G, metrics, project_name, sqlite_path, frontend_dir)
     else:
         logger.warning("Graph is empty, skipping analysis and export.")
     
     logger.info("Dependency Graph Phase Complete.")
 
 
-def _run_ai_phase(resume: bool):
-    import builtins
+def _run_ai_phase(run_id: int):
     logger.info("Starting AI Agent Phase...")
-    
-    # Monkeypatch input() to automatically pass the resume flag
-    original_input = builtins.input
-    if resume:
-        def mock_input(prompt=""):
-            logger.info(f"Auto-answering 'y' to AI agent prompt: {prompt}")
-            return "y"
-        builtins.input = mock_input
-    else:
-        def mock_input(prompt=""):
-            logger.info(f"Auto-answering 'n' to AI agent prompt: {prompt}")
-            return "n"
-        builtins.input = mock_input
-
     try:
         from mcp_agent.agent import run_full_codebase_audit
-        run_full_codebase_audit()
+        run_full_codebase_audit(run_id)
     except ImportError as e:
         logger.error(f"Could not import AI agent: {e}")
     except Exception as e:
         logger.error(f"AI Agent failed: {e}")
     finally:
-        builtins.input = original_input
         logger.info("AI Agent Phase Complete.")
 
 
@@ -431,8 +415,15 @@ def _run_report_phase():
     logger.info(f"Launching Backend Server: {' '.join(backend_cmd)}")
     backend_proc = subprocess.Popen(backend_cmd)
     
+    # Inject Node 24 into PATH to bypass NVM symlink issues
+    env = os.environ.copy()
+    nvm_path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "nvm", "v24.14.1")
+    if os.path.exists(nvm_path):
+        env["PATH"] = nvm_path + os.pathsep + env.get("PATH", "")
+        logger.info(f"Injecting NVM Node 24 path into environment: {nvm_path}")
+
     logger.info(f"Launching Frontend Server: {frontend_cmd} (cwd: {frontend_cwd})")
-    frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_cwd, shell=True)
+    frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_cwd, shell=True, env=env)
     
     try:
         logger.info("Servers are running. Press Ctrl+C to shut down.")
@@ -505,14 +496,42 @@ def main():
         run_ai = True
         run_report = True
 
-    if run_scout:
-        _run_scout_phase()
-    
-    if run_graph:
-        _run_graph_phase()
-    
-    if run_ai:
-        _run_ai_phase(resume=args.resume)
+    if run_scout or run_graph or run_ai:
+        sqlite_path = Path(cfg.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db"))
+        init_db(sqlite_path)
+        
+        # Resume logic
+        run_id = None
+        if args.resume:
+            import sqlite3
+            with sqlite3.connect(sqlite_path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT id FROM audit_runs WHERE project_name = ? AND status = 'in_progress' ORDER BY id DESC LIMIT 1", (project_name,)).fetchone()
+                if row:
+                    run_id = row["id"]
+                    logger.info(f"Resuming existing in_progress run_id={run_id}")
+                else:
+                    logger.warning("No in_progress run found to resume. Creating a new one.")
+        
+        if run_id is None:
+            run_id = create_audit_run(project_name, sqlite_path)
+            logger.info(f"Created new run_id={run_id}")
+            
+        total = 0
+        try:
+            if run_scout:
+                total = _run_scout_phase(run_id)
+            
+            if run_graph:
+                _run_graph_phase(run_id)
+            
+            if run_ai:
+                _run_ai_phase(run_id)
+                
+            update_audit_run(run_id, completed=True, total_files=total, db_path=sqlite_path)
+        except Exception:
+            update_audit_run(run_id, status="failed", db_path=sqlite_path)
+            raise
     
     if run_report:
         _run_report_phase()

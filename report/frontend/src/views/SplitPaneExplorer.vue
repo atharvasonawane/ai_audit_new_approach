@@ -174,9 +174,10 @@ const getIssueBadgeClass = (f) => {
 }
 
 const fetchFiles = async () => {
+  const runId = route.query.run_id
   loading.value = true; error.value = null
   try {
-    const res = await filesAPI.getFiles()
+    const res = await filesAPI.getFiles(runId)
     files.value = res.data || []
   } catch (err) {
     error.value = err.code === 'ERR_NETWORK' ? 'Cannot connect to API server' : err.message || 'Error'
@@ -189,6 +190,10 @@ const selectFile = (file) => {
 }
 
 onMounted(fetchFiles)
+
+watch(() => route.query.run_id, () => {
+  fetchFiles()
+})
 
 watch(() => route.query.file, (p) => {
   if (p && files.value.length > 0) {

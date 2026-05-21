@@ -374,7 +374,7 @@ def classify_relationship(child_file_rel: str) -> str:
         return 'utility'
 
 
-def run_import_extraction(project_path: str, project_name: str, db_path: str):
+def run_import_extraction(run_id: int, project_path: str, project_name: str, db_path: str):
     logger.info(f"Starting import extraction for '{project_name}' at '{project_path}'")
     aliases = get_aliases(project_path)
     logger.info(f"[alias resolver] Active aliases: { {k: v for k, v in aliases.items()} }")
@@ -382,8 +382,8 @@ def run_import_extraction(project_path: str, project_name: str, db_path: str):
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys=ON;")
 
-    conn.execute("DELETE FROM component_relationships WHERE project_name = ?", (project_name,))
-    conn.execute("DELETE FROM unresolved_imports WHERE project_name = ?", (project_name,))
+    conn.execute("DELETE FROM component_relationships WHERE run_id = ?", (run_id,))
+    conn.execute("DELETE FROM unresolved_imports WHERE run_id = ?", (run_id,))
 
     relationships = []
     unresolved = []
@@ -461,16 +461,16 @@ def run_import_extraction(project_path: str, project_name: str, db_path: str):
     if relationships:
         conn.executemany(
             """INSERT OR IGNORE INTO component_relationships
-               (project_name, parent_file, child_file, relationship_type)
-               VALUES (?, ?, ?, ?)""",
-            relationships,
+               (run_id, project_name, parent_file, child_file, relationship_type)
+               VALUES (?, ?, ?, ?, ?)""",
+            [(run_id, r[0], r[1], r[2], r[3]) for r in relationships],
         )
     if unresolved:
         conn.executemany(
             """INSERT INTO unresolved_imports
-               (project_name, parent_file, raw_import, reason)
-               VALUES (?, ?, ?, ?)""",
-            unresolved,
+               (run_id, project_name, parent_file, raw_import, reason)
+               VALUES (?, ?, ?, ?, ?)""",
+            [(run_id, u[0], u[1], u[2], u[3]) for u in unresolved],
         )
 
     conn.commit()

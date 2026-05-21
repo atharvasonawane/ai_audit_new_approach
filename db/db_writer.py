@@ -6,7 +6,6 @@ from typing import Any, Dict, Iterable, Optional
 
 from db.db_init import DEFAULT_DB_PATH
 
-
 def _get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     path = Path(db_path) if db_path else DEFAULT_DB_PATH
     conn = sqlite3.connect(path)
@@ -15,31 +14,146 @@ def _get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
 
-
 def _normalize_path(file_path: str, base_path: str) -> str:
     if base_path:
         try:
             from extractors.path_utils import normalize_path
-
             return normalize_path(file_path, base_path)
         except Exception:
             pass
-
     return file_path.replace("\\", "/")
-
 
 def calculate_file_hash(filepath: str) -> str:
     import hashlib
-
     try:
         with open(filepath, "rb") as handle:
             return hashlib.sha256(handle.read()).hexdigest()
     except Exception:
         return ""
 
+def create_audit_run(project_name: str, db_path: Optional[Path] = None) -> int:
+    with _get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO audit_runs (project_name, started_at, status) VALUES (?, datetime('now'), 'in_progress')",
+            (project_name,)
+        )
+        new_run_id = cur.lastrowid
+        
+        # Copy data from the previous completed run
+        prev_run = conn.execute(
+            "SELECT id FROM audit_runs WHERE project_name = ? AND status = 'completed' ORDER BY started_at DESC LIMIT 1",
+            (project_name,)
+        ).fetchone()
+        
+        if prev_run:
+            prev_id = prev_run["id"]
+            
+            # Copy vue_files
+            conn.execute(f"""
+                INSERT INTO vue_files (run_id, project_name, file_path, file_hash, script_lines, template_lines, style_lines, methods, computed, watchers, props, emits, api_total, api_in_mounted, api_in_loop, child_components, max_nesting_depth, cyclomatic_complexity, payload_size_kb, eslint_flag_count, script_setup, template_only, typescript_detected, last_modified, scanned_at)
+                SELECT ?, project_name, file_path, file_hash, script_lines, template_lines, style_lines, methods, computed, watchers, props, emits, api_total, api_in_mounted, api_in_loop, child_components, max_nesting_depth, cyclomatic_complexity, payload_size_kb, eslint_flag_count, script_setup, template_only, typescript_detected, last_modified, scanned_at
+                FROM vue_files WHERE run_id = ?
+            """, (new_run_id, prev_id))
+            
+            # api_calls
+            conn.execute(f"""
+                INSERT INTO api_calls (run_id, vue_file_id, project_name, file_path, api_type, method_name, endpoint, in_mounted, in_loop, line_number)
+                SELECT ?, nv.id, o.project_name, o.file_path, o.api_type, o.method_name, o.endpoint, o.in_mounted, o.in_loop, o.line_number
+                FROM api_calls o
+                JOIN vue_files ov ON o.vue_file_id = ov.id
+                JOIN vue_files nv ON nv.run_id = ? AND nv.file_path = ov.file_path
+                WHERE o.run_id = ?
+            """, (new_run_id, new_run_id, prev_id))
+            
+            # file_flags
+            conn.execute(f"""
+                INSERT INTO file_flags (run_id, vue_file_id, project_name, file_path, category, rule, message, severity, line_number, column_number)
+                SELECT ?, nv.id, o.project_name, o.file_path, o.category, o.rule, o.message, o.severity, o.line_number, o.column_number
+                FROM file_flags o
+                JOIN vue_files ov ON o.vue_file_id = ov.id
+                JOIN vue_files nv ON nv.run_id = ? AND nv.file_path = ov.file_path
+                WHERE o.run_id = ?
+            """, (new_run_id, new_run_id, prev_id))
+            
+            # accessibility_defects
+            conn.execute(f"""
+                INSERT INTO accessibility_defects (run_id, vue_file_id, project_name, file_path, rule, message, wcag_criterion, wcag_level, line_number, column_number)
+                SELECT ?, nv.id, o.project_name, o.file_path, o.rule, o.message, o.wcag_criterion, o.wcag_level, o.line_number, o.column_number
+                FROM accessibility_defects o
+                JOIN vue_files ov ON o.vue_file_id = ov.id
+                JOIN vue_files nv ON nv.run_id = ? AND nv.file_path = ov.file_path
+                WHERE o.run_id = ?
+            """, (new_run_id, new_run_id, prev_id))
+            
+            # ai_issues
+            conn.execute(f"""
+                INSERT INTO ai_issues (run_id, vue_file_id, project_name, file_path, phase, issue_category, title, description, severity, line_number, code_snippet, recommendation, created_at)
+                SELECT ?, nv.id, o.project_name, o.file_path, o.phase, o.issue_category, o.title, o.description, o.severity, o.line_number, o.code_snippet, o.recommendation, o.created_at
+                FROM ai_issues o
+                JOIN vue_files ov ON o.vue_file_id = ov.id
+                JOIN vue_files nv ON nv.run_id = ? AND nv.file_path = ov.file_path
+                WHERE o.run_id = ?
+            """, (new_run_id, new_run_id, prev_id))
+            
+            # component_relationships
+            conn.execute(f"""
+                INSERT INTO component_relationships (run_id, project_name, parent_file, child_file, relationship_type)
+                SELECT ?, project_name, parent_file, child_file, relationship_type
+                FROM component_relationships WHERE run_id = ?
+            """, (new_run_id, prev_id))
 
-def upsert_vue_file(data: Dict[str, Any], db_path: Optional[Path] = None) -> int:
+            # unresolved_imports
+            conn.execute(f"""
+                INSERT INTO unresolved_imports (run_id, project_name, parent_file, raw_import, reason, scanned_at)
+                SELECT ?, project_name, parent_file, raw_import, reason, scanned_at
+                FROM unresolved_imports WHERE run_id = ?
+            """, (new_run_id, prev_id))
+
+            # dependency_metrics
+            conn.execute(f"""
+                INSERT INTO dependency_metrics (run_id, project_name, file_path, in_degree, out_degree, depth, impact_score, node_category, is_in_cycle, cycle_members, dependents, dependencies)
+                SELECT ?, project_name, file_path, in_degree, out_degree, depth, impact_score, node_category, is_in_cycle, cycle_members, dependents, dependencies
+                FROM dependency_metrics WHERE run_id = ?
+            """, (new_run_id, prev_id))
+            
+        conn.commit()
+        return new_run_id
+
+def update_audit_run(
+    run_id: int, 
+    status: Optional[str] = None, 
+    last_completed_file: Optional[str] = None,
+    total_files: Optional[int] = None, 
+    synthesis_text: Optional[str] = None, 
+    completed: bool = False,
+    db_path: Optional[Path] = None
+) -> None:
+    fields, params = [], []
+    if status:                   
+        fields.append("status = ?")
+        params.append(status)
+    if last_completed_file:      
+        fields.append("last_completed_file = ?")
+        params.append(last_completed_file)
+    if total_files is not None:  
+        fields.append("total_files = ?")
+        params.append(total_files)
+    if synthesis_text:           
+        fields.append("synthesis_text = ?")
+        params.append(synthesis_text)
+    if completed:
+        fields += ["status = 'completed'", "completed_at = datetime('now')"]
+        
+    if not fields: return
+    params.append(run_id)
+    
+    with _get_connection(db_path) as conn:
+        conn.execute(f"UPDATE audit_runs SET {', '.join(fields)} WHERE id = ?", params)
+        conn.commit()
+
+def upsert_vue_file(run_id: int, data: Dict[str, Any], db_path: Optional[Path] = None) -> int:
     columns = [
+        "run_id",
         "project_name",
         "file_path",
         "file_hash",
@@ -66,14 +180,15 @@ def upsert_vue_file(data: Dict[str, Any], db_path: Optional[Path] = None) -> int
         "scanned_at",
     ]
 
+    data["run_id"] = run_id
     values = [data.get(col) for col in columns]
 
-    set_clause = ", ".join([f"{col}=excluded.{col}" for col in columns[2:]])
+    set_clause = ", ".join([f"{col}=excluded.{col}" for col in columns if col not in ["run_id", "project_name", "file_path"]])
 
     sql = f"""
         INSERT INTO vue_files ({", ".join(columns)})
         VALUES ({", ".join(["?"] * len(columns))})
-        ON CONFLICT(project_name, file_path) DO UPDATE SET
+        ON CONFLICT(run_id, project_name, file_path) DO UPDATE SET
         {set_clause}
     """
 
@@ -84,39 +199,25 @@ def upsert_vue_file(data: Dict[str, Any], db_path: Optional[Path] = None) -> int
 
         if not row_id:
             row = conn.execute(
-                "SELECT id FROM vue_files WHERE project_name = ? AND file_path = ?",
-                (data.get("project_name"), data.get("file_path")),
+                "SELECT id FROM vue_files WHERE run_id = ? AND project_name = ? AND file_path = ?",
+                (run_id, data.get("project_name"), data.get("file_path")),
             ).fetchone()
             if row:
                 row_id = row["id"]
 
     return int(row_id)
 
-
-def upsert_api_call(data: Dict[str, Any], db_path: Optional[Path] = None) -> int:
-    return _upsert_by_id("api_calls", data, db_path)
-
-
-def upsert_file_flag(data: Dict[str, Any], db_path: Optional[Path] = None) -> int:
-    return _upsert_by_id("file_flags", data, db_path)
-
-
-def upsert_accessibility_defect(
-    data: Dict[str, Any], db_path: Optional[Path] = None
-) -> int:
-    return _upsert_by_id("accessibility_defects", data, db_path)
-
-
 def upsert_component_relationship(
-    data: Dict[str, Any], db_path: Optional[Path] = None
+    run_id: int, data: Dict[str, Any], db_path: Optional[Path] = None
 ) -> int:
-    columns = ["project_name", "parent_file", "child_file", "relationship_type"]
+    columns = ["run_id", "project_name", "parent_file", "child_file", "relationship_type"]
+    data["run_id"] = run_id
     values = [data.get(col) for col in columns]
 
     sql = f"""
         INSERT INTO component_relationships ({", ".join(columns)})
         VALUES ({", ".join(["?"] * len(columns))})
-        ON CONFLICT(project_name, parent_file, child_file) DO UPDATE SET
+        ON CONFLICT(run_id, project_name, parent_file, child_file) DO UPDATE SET
         relationship_type=excluded.relationship_type
     """
 
@@ -125,25 +226,40 @@ def upsert_component_relationship(
         conn.commit()
         return int(cur.lastrowid or 0)
 
-
-def upsert_ai_issue(data: Dict[str, Any], db_path: Optional[Path] = None) -> int:
-    return _upsert_by_id("ai_issues", data, db_path)
-
-
-def upsert_audit_run(data: Dict[str, Any], db_path: Optional[Path] = None) -> int:
-    return _upsert_by_id("audit_runs", data, db_path)
-
+def insert_ai_issues_bulk(run_id: int, issues: list[dict], db_path: Optional[Path] = None):
+    with _get_connection(db_path) as conn:
+        for i in issues:
+            conn.execute(
+                """
+                INSERT INTO ai_issues 
+                  (run_id, vue_file_id, project_name, file_path, phase, issue_category, 
+                   title, description, severity, line_number, code_snippet, recommendation) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id, i.get("vue_file_id"), i.get("project_name"), i.get("file_path"),
+                    i.get("phase"), i.get("issue_category"), i.get("title"), i.get("description"),
+                    i.get("severity"), i.get("line_number"), i.get("code_snippet"), i.get("recommendation")
+                )
+            )
+        conn.commit()
 
 def get_all_file_hashes(
-    project_name: str, db_path: Optional[Path] = None
+    project_name: str, run_id: Optional[int] = None, db_path: Optional[Path] = None
 ) -> Dict[str, Dict[str, Any]]:
-    sql = (
-        "SELECT file_path, file_hash, scanned_at FROM vue_files WHERE project_name = ?"
-    )
     results: Dict[str, Dict[str, Any]] = {}
-
     with _get_connection(db_path) as conn:
-        for row in conn.execute(sql, (project_name,)):
+        if run_id is None:
+            # Fall back to latest run
+            run_row = conn.execute("SELECT id FROM audit_runs WHERE project_name = ? AND status = 'completed' ORDER BY started_at DESC LIMIT 1", (project_name,)).fetchone()
+            if not run_row:
+                return results
+            run_id_val = run_row["id"]
+        else:
+            run_id_val = run_id
+            
+        sql = "SELECT file_path, file_hash, scanned_at FROM vue_files WHERE run_id = ? AND project_name = ?"
+        for row in conn.execute(sql, (run_id_val, project_name)):
             scanned_at = row["scanned_at"]
             scanned_dt = None
             if scanned_at:
@@ -157,11 +273,10 @@ def get_all_file_hashes(
                     "hash": row["file_hash"],
                     "scanned_at": scanned_dt,
                 }
-
     return results
 
-
 def write_scan_result(
+    run_id: int,
     project_name: str,
     cfg: Dict[str, Any],
     result: Dict[str, Any],
@@ -183,6 +298,7 @@ def write_scan_result(
     api_in_loop = sum(1 for call in api_calls if call.get("in_loop"))
 
     vue_file_id = upsert_vue_file(
+        run_id,
         {
             "project_name": project_name,
             "file_path": normalized_path,
@@ -213,16 +329,18 @@ def write_scan_result(
     )
 
     with _get_connection(db_path) as conn:
+        # Since vue_file_id is unique per run, this clears out the old duplicated data
         conn.execute("DELETE FROM api_calls WHERE vue_file_id = ?", (vue_file_id,))
 
         for call in api_calls:
             conn.execute(
                 """
                 INSERT INTO api_calls
-                    (vue_file_id, project_name, file_path, api_type, method_name, endpoint, in_mounted, in_loop, line_number)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (run_id, vue_file_id, project_name, file_path, api_type, method_name, endpoint, in_mounted, in_loop, line_number)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    run_id,
                     vue_file_id,
                     project_name,
                     normalized_path,
@@ -234,13 +352,12 @@ def write_scan_result(
                     call.get("line_number", 0),
                 ),
             )
-
         conn.commit()
 
     return vue_file_id
 
-
 def write_eslint_results(
+    run_id: int,
     project_name: str,
     cfg: Dict[str, Any],
     eslint_results: Iterable[Dict[str, Any]],
@@ -258,8 +375,8 @@ def write_eslint_results(
         for entry in eslint_results:
             normalized_path = _normalize_path(entry.get("file_path", ""), base_path)
             row = conn.execute(
-                "SELECT id FROM vue_files WHERE project_name = ? AND file_path = ?",
-                (project_name, normalized_path),
+                "SELECT id FROM vue_files WHERE run_id = ? AND project_name = ? AND file_path = ?",
+                (run_id, project_name, normalized_path),
             ).fetchone()
             if not row:
                 continue
@@ -284,10 +401,11 @@ def write_eslint_results(
                 conn.execute(
                     """
                     INSERT INTO accessibility_defects
-                        (vue_file_id, project_name, file_path, rule, message, wcag_criterion, wcag_level, line_number, column_number)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (run_id, vue_file_id, project_name, file_path, rule, message, wcag_criterion, wcag_level, line_number, column_number)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
+                        run_id,
                         vue_file_id,
                         project_name,
                         normalized_path,
@@ -304,10 +422,11 @@ def write_eslint_results(
                 conn.execute(
                     """
                     INSERT INTO file_flags
-                        (vue_file_id, project_name, file_path, category, rule, message, severity, line_number, column_number)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (run_id, vue_file_id, project_name, file_path, category, rule, message, severity, line_number, column_number)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
+                        run_id,
                         vue_file_id,
                         project_name,
                         normalized_path,
@@ -325,7 +444,6 @@ def write_eslint_results(
 
         # Update eslint_flag_count in vue_files for all touched files
         for vue_file_id in touched_files:
-            # Count non-accessibility flags (category = 'eslint')
             flag_count_row = conn.execute(
                 """
                 SELECT COUNT(*) AS cnt
@@ -336,7 +454,6 @@ def write_eslint_results(
             ).fetchone()
             flag_count = flag_count_row["cnt"] if flag_count_row else 0
             
-            # Update vue_files
             conn.execute(
                 "UPDATE vue_files SET eslint_flag_count = ? WHERE id = ?",
                 (flag_count, vue_file_id),
@@ -349,11 +466,11 @@ def write_eslint_results(
         "accessibility_defects": accessibility_written,
     }
 
-
-def _upsert_by_id(table: str, data: Dict[str, Any], db_path: Optional[Path]) -> int:
+def _upsert_by_id(table: str, run_id: int, data: Dict[str, Any], db_path: Optional[Path]) -> int:
     if not data:
         raise ValueError("data is required")
 
+    data["run_id"] = run_id
     columns = list(data.keys())
     values = [data.get(col) for col in columns]
 

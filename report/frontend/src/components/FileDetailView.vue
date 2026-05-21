@@ -218,10 +218,12 @@
 
 <script setup>
 import { ref, watch, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { filesAPI } from '../api.js'
 import CodeSnippet from './CodeSnippet.vue'
 
 const props = defineProps({ filePath: { type: String, required: true } })
+const route = useRoute()
 
 const loading = ref(false)
 const error = ref(null)
@@ -254,14 +256,15 @@ const getSeverityClass = (s) => {
 
 const fetchFileData = async () => {
   if (!props.filePath) return
+  const runId = route.query.run_id
   loading.value = true; error.value = null
   try {
     const [metricsRes, aiRes, eslintRes, a11yRes, apiRes] = await Promise.all([
-      filesAPI.getFileMetrics(props.filePath),
-      filesAPI.getFileAIIssues(props.filePath),
-      filesAPI.getFileESLint(props.filePath),
-      filesAPI.getFileAccessibility(props.filePath),
-      filesAPI.getFileAPICalls(props.filePath)
+      filesAPI.getFileMetrics(props.filePath, runId),
+      filesAPI.getFileAIIssues(props.filePath, runId),
+      filesAPI.getFileESLint(props.filePath, runId),
+      filesAPI.getFileAccessibility(props.filePath, runId),
+      filesAPI.getFileAPICalls(props.filePath, runId)
     ])
     metrics.value = metricsRes.data || {}
     aiIssues.value = aiRes.data || []
@@ -274,4 +277,5 @@ const fetchFileData = async () => {
 }
 
 watch(() => props.filePath, (p) => { if (p) fetchFileData() }, { immediate: true })
+watch(() => route.query.run_id, () => { if (props.filePath) fetchFileData() })
 </script>

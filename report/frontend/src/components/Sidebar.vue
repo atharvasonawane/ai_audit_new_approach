@@ -33,7 +33,7 @@
       <div class="flex flex-col gap-1.5">
         <div class="text-[10px] font-bold uppercase px-3 pb-1.5 text-gray-500 dark:text-gray-400 tracking-widest">Main</div>
         
-        <router-link to="/" class="group flex items-center gap-3 px-3 py-2.5 rounded-lg no-underline text-sm transition-all duration-200 relative cursor-pointer border-l-2" 
+        <router-link :to="getRoute('/')" class="group flex items-center gap-3 px-3 py-2.5 rounded-lg no-underline text-sm transition-all duration-200 relative cursor-pointer border-l-2" 
                      :class="isActive('/') ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border-indigo-500 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white hover:border-indigo-500/30 border-transparent font-medium'">
           <svg class="w-[18px] h-[18px] shrink-0 transition-colors duration-200" :class="isActive('/') ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-700 dark:group-hover:text-gray-300'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -42,7 +42,7 @@
           <span class="flex-1 overflow-hidden overflow-ellipsis whitespace-nowrap">Home</span>
         </router-link>
 
-        <router-link to="/dashboard" class="group flex items-center gap-3 px-3 py-2.5 rounded-lg no-underline text-sm transition-all duration-200 relative cursor-pointer border-l-2" 
+        <router-link :to="getRoute('/dashboard')" class="group flex items-center gap-3 px-3 py-2.5 rounded-lg no-underline text-sm transition-all duration-200 relative cursor-pointer border-l-2" 
                      :class="isActive('/dashboard') ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border-indigo-500 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white hover:border-indigo-500/30 border-transparent font-medium'">
           <svg class="w-[18px] h-[18px] shrink-0 transition-colors duration-200" :class="isActive('/dashboard') ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-700 dark:group-hover:text-gray-300'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="3" width="7" height="7"/>
@@ -53,7 +53,7 @@
           <span class="flex-1 overflow-hidden overflow-ellipsis whitespace-nowrap">Dashboard</span>
         </router-link>
 
-        <router-link to="/audit" class="group flex items-center gap-3 px-3 py-2.5 rounded-lg no-underline text-sm transition-all duration-200 relative cursor-pointer border-l-2" 
+        <router-link :to="getRoute('/audit')" class="group flex items-center gap-3 px-3 py-2.5 rounded-lg no-underline text-sm transition-all duration-200 relative cursor-pointer border-l-2" 
                      :class="isActive('/audit') ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border-indigo-500 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white hover:border-indigo-500/30 border-transparent font-medium'">
           <svg class="w-[18px] h-[18px] shrink-0 transition-colors duration-200" :class="isActive('/audit') ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-700 dark:group-hover:text-gray-300'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
@@ -62,7 +62,7 @@
           <span class="flex-1 overflow-hidden overflow-ellipsis whitespace-nowrap">Audit Explorer</span>
         </router-link>
 
-        <router-link to="/graph" class="group flex items-center gap-3 px-3 py-2.5 rounded-lg no-underline text-sm transition-all duration-200 relative cursor-pointer border-l-2" 
+        <router-link :to="getRoute('/graph')" class="group flex items-center gap-3 px-3 py-2.5 rounded-lg no-underline text-sm transition-all duration-200 relative cursor-pointer border-l-2" 
                      :class="isActive('/graph') ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border-indigo-500 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white hover:border-indigo-500/30 border-transparent font-medium'">
           <svg class="w-[18px] h-[18px] shrink-0 transition-colors duration-200" :class="isActive('/graph') ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-700 dark:group-hover:text-gray-300'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <circle cx="18" cy="5" r="3"/>
@@ -92,4 +92,8 @@
 import { useRoute } from 'vue-router'
 const route = useRoute()
 const isActive = (path) => route.path === path
+
+const getRoute = (path) => {
+  return { path, query: route.query.run_id ? { run_id: route.query.run_id } : {} }
+}
 </script>
