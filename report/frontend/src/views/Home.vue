@@ -92,8 +92,9 @@
               v-model="projectPath"
               type="text"
               placeholder="/path/to/your/vue-project"
-              class="w-full py-2.5 pr-3.5 pl-9 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700/50 text-gray-900 dark:text-gray-100 rounded-lg text-[13px] font-mono outline-none transition-all duration-200 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-400/40 focus:bg-blue-500/10 focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 caret-gray-900 dark:caret-white"
-              @keydown.enter="startAnalysis"
+              class="w-full py-2.5 pr-3.5 pl-9 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700/50 text-gray-900 dark:text-gray-100 rounded-lg text-[13px] font-mono outline-none transition-all duration-200 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-400/40 focus:bg-blue-500/10 focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 caret-gray-900 dark:caret-white disabled:opacity-50 disabled:cursor-not-allowed"
+              :disabled="isAnalyzing"
+              @keydown.enter="analyzeNow"
             />
           </div>
 
@@ -116,7 +117,7 @@
               class="hidden"
               @change="handleFolderSelect"
             />
-            <button class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 hover:bg-gray-200 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-100" @click="folderInput.click()">
+            <button class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 hover:bg-gray-200 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-100" @click="handleBrowse">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
               </svg>
@@ -124,14 +125,34 @@
             </button>
             <button
               class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white flex-1 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 shadow-[0_4px_12px_rgba(59,130,246,0.2)] hover:-translate-y-[1px] hover:shadow-[0_6px_20px_rgba(59,130,246,0.3)] disabled:bg-slate-500/20 disabled:bg-none disabled:text-slate-500 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
-              :disabled="!projectPath"
-              @click="startAnalysis"
+              :disabled="!projectPath || isAnalyzing"
+              @click="analyzeNow"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg v-if="isAnalyzing" class="animate-spin -ml-1 mr-2 h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="5 3 19 12 5 21 5 3"/>
               </svg>
-              Analyze Now
+              {{ isAnalyzing ? 'Analyzing... Please wait' : 'Analyze Now' }}
             </button>
+          </div>
+
+          <div v-if="scanSuccess" class="flex items-center gap-2 py-2.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[12px] text-emerald-600 dark:text-emerald-400">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            {{ scanSuccess }}
+          </div>
+          <div v-if="scanError" class="flex items-center gap-2 py-2.5 px-3 bg-red-500/10 border border-red-500/20 rounded-lg text-[12px] text-red-600 dark:text-red-400">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            {{ scanError }}
           </div>
 
           <div class="flex flex-col items-center justify-center gap-2 py-8 px-6 border border-dashed border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 rounded-[10px] text-[13px] text-center">
@@ -174,16 +195,23 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { filesAPI } from '../api.js'
+import { getVsCodeApi } from '../utils/vscode.js'
 
 const router = useRouter()
 const loading = ref(false)
 const recentAudits = ref([])
 const projectPath = ref('')
+const hasReceivedPath = ref(false)
+
 const pathError = ref('')
 const folderInput = ref(null)
+
+const isAnalyzing = ref(false)
+const scanSuccess = ref('')
+const scanError = ref('')
 
 const handleFolderSelect = (e) => {
   const files = e.target.files
@@ -192,6 +220,15 @@ const handleFolderSelect = (e) => {
     const rootFolder = files[0].webkitRelativePath.split('/')[0]
     console.log('[Browse] Selected folder:', rootFolder)
     projectPath.value = rootFolder
+  }
+}
+
+const handleBrowse = () => {
+  const vscode = getVsCodeApi()
+  if (vscode) {
+    vscode.postMessage({ command: 'openFolderDialog' })
+  } else {
+    folderInput.value.click()
   }
 }
 
@@ -234,11 +271,87 @@ const navigateToDashboard = (runId) => {
     router.push('/dashboard')
   }
 }
-const startAnalysis = () => {
+const analyzeNow = async () => {
+  console.log('[Home.vue] analyzeNow triggered with path:', projectPath.value)
+  
+  if (!projectPath.value) { 
+    alert("Path is empty!")
+    return 
+  }
+
   pathError.value = ''
-  if (!projectPath.value) { pathError.value = 'Please enter a project directory path'; return }
-  router.push({ path: '/analyzing', query: { path: projectPath.value } })
+  scanSuccess.value = ''
+  scanError.value = ''
+  isAnalyzing.value = true
+  
+  try {
+    const port = window.__FLASK_PORT__ || 5000
+    const res = await fetch(`http://localhost:${port}/api/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: projectPath.value })
+    })
+    
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || data.details || 'Analysis failed')
+    }
+    
+    scanSuccess.value = data.message || 'Analysis complete! The dashboard will now reflect the latest data.'
+    await fetchRecentAudits()
+  } catch (err) {
+    scanError.value = err.message || 'An unexpected error occurred during analysis.'
+  } finally {
+    isAnalyzing.value = false
+  }
 }
 
-onMounted(fetchRecentAudits)
+const handleMessage = (event) => {
+  const message = event.data
+  if (!message || typeof message !== 'object') return
+
+  if (message.command === 'setWorkspacePath') {
+    // Pong from extension in response to our 'webviewReady' ping
+    if (message.path !== undefined) {
+      console.log('[Home.vue] Received workspace path via handshake:', message.path)
+      projectPath.value = message.path
+    }
+  } else if (message.command === 'setPath') {
+    // Legacy / visibility-change fallback
+    if (message.payload !== undefined) {
+      console.log('[Home.vue] Received workspace path (legacy setPath):', message.payload)
+      projectPath.value = message.payload
+    }
+  } else if (message.type === 'selectedFolder' && message.path) {
+    console.log('[Home.vue] Received selected folder from extension:', message.path)
+    projectPath.value = message.path
+  }
+}
+
+onMounted(() => {
+  fetchRecentAudits()
+
+  // ── Layer 1: Synchronous (most reliable) ────────────────────────────────
+  // The extension injects window.__WORKSPACE_PATH__ directly into the HTML
+  // <head> before the page even renders — read it immediately.
+  const injectedPath = window.__WORKSPACE_PATH__
+  if (injectedPath) {
+    projectPath.value = injectedPath
+    console.log('[Home.vue] Path from injected global:', injectedPath)
+  }
+
+  // ── Layer 2: Async ping-pong handshake (dynamic / tab-restore) ──────────
+  // Register listener BEFORE sending the ping so we never miss the pong.
+  window.addEventListener('message', handleMessage)
+
+  const vscode = getVsCodeApi()
+  if (vscode) {
+    vscode.postMessage({ command: 'webviewReady' })
+    console.log('[Home.vue] Sent webviewReady ping to extension host')
+  }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('message', handleMessage)
+})
 </script>

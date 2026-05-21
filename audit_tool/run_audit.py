@@ -473,6 +473,7 @@ def main():
     parser.add_argument("--ai-only", action="store_true", help="Runs the AI phase and exits.")
     parser.add_argument("--resume", action="store_true", help="Resumes a previously interrupted run (for AI phase).")
     parser.add_argument("--report-only", action="store_true", help="Boots the frontend and backend servers simultaneously and keeps them alive.")
+    parser.add_argument("--no-report", action="store_true", help="Skips launching the report servers at the end of the pipeline.")
     
     args = parser.parse_args()
 
@@ -494,7 +495,7 @@ def main():
         run_scout = True
         run_graph = True
         run_ai = True
-        run_report = True
+        run_report = not args.no_report
 
     if run_scout or run_graph or run_ai:
         sqlite_path = Path(cfg.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db"))

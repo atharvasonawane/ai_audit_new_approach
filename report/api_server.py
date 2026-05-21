@@ -9,12 +9,23 @@ Dynamic code snippets generated for api_calls, file_flags, and accessibility_def
 import argparse
 import json
 import sqlite3
+import subprocess
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+import logging
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('api_server')
 
 app = Flask(__name__)
 CORS(app)
@@ -780,6 +791,65 @@ def get_dependency_summary():
             data = json.load(f)
         return jsonify(data.get("summary", {}))
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scan", methods=["POST"])
+def scan_project():
+    """
+    POST /api/scan
+    Executes the main analysis pipeline (run_audit.py) on the given path.
+    Body: { "path": "/absolute/path/to/project" }
+    """
+    try:
+        data = request.json
+        if not data or "path" not in data:
+            logger.error("Scan API called with missing 'path' in body.")
+            return jsonify({"error": "Missing 'path' in request body"}), 400
+        
+        project_path = data["path"]
+        logger.info(f"Received scan request for path: {project_path}")
+        
+        if not os.path.exists(project_path):
+            logger.error(f"Provided path does not exist: {project_path}")
+            return jsonify({"error": f"Path does not exist: {project_path}"}), 400
+
+        # Update project_config.yaml
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+            
+        config["base_path"] = project_path
+        config["project_name"] = os.path.basename(os.path.normpath(project_path))
+        
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, sort_keys=False)
+
+        # Run the pipeline
+        run_audit_script = PROJECT_ROOT / "audit_tool" / "run_audit.py"
+        python_exe = PROJECT_ROOT / "audit_tool" / "venv" / "Scripts" / "python.exe"
+        
+        # Determine python executable to use
+        exe = str(python_exe) if python_exe.exists() else sys.executable
+        
+        logger.info(f"Executing pipeline: {exe} {run_audit_script} --no-report")
+        
+        # Run subprocess (blocking) with capture_output to catch stderr
+        result = subprocess.run(
+            [exe, str(run_audit_script), "--no-report"],
+            capture_output=True,
+            text=True,
+            cwd=str(PROJECT_ROOT)
+        )
+        
+        if result.returncode == 0:
+            logger.info("Pipeline execution completed successfully.")
+            return jsonify({"status": "success", "message": "Analysis complete"})
+        else:
+            logger.error(f"Pipeline execution failed with return code {result.returncode}. Stderr: {result.stderr}")
+            return jsonify({"error": "Analysis failed", "details": result.stderr}), 500
+            
+    except Exception as e:
+        logger.exception("An unexpected error occurred during scan execution.")
         return jsonify({"error": str(e)}), 500
 
 

@@ -11,22 +11,20 @@ export function activate(context: vscode.ExtensionContext) {
         const port = 5000 + Math.floor(Math.random() * 1000);
 
         const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders) {
-            vscode.window.showErrorMessage('Code Audit Librarian requires an open workspace.');
-            return;
-        }
 
-        const workspacePath = workspaceFolders[0].uri.fsPath;
+        // Absolute path to the project root — normalized so backslashes are single on Windows
+        const rootPath = path.normalize("C:\\Users\\Atharvaso\\Desktop\\final_approach_main");
 
-        // TODO: Replace this with the absolute path to your audit_tool folder
-        const rootPath = "C:\\\\Users\\\\Atharvaso\\\\Desktop\\\\final_approach_main";
+        const workspacePath = workspaceFolders && workspaceFolders.length > 0 
+            ? workspaceFolders[0].uri.fsPath 
+            : rootPath;  // fall back to project root when no folder is open
         const apiServerPath = path.join(rootPath, 'report', 'api_server.py');
         const venvPythonPath = path.join(rootPath, 'audit_tool', 'venv', 'Scripts', 'python.exe');
 
         // Spawn the Flask server
         try {
             apiProcess = cp.spawn(venvPythonPath, [apiServerPath, '--port', port.toString()], {
-                cwd: workspacePath
+                cwd: workspacePath || rootPath
             });
 
             apiProcess.stdout?.on('data', (data) => console.log(`Flask: ${data}`));
@@ -47,9 +45,49 @@ export function activate(context: vscode.ExtensionContext) {
             }
         );
 
-        // Inject HTML
-        const htmlContent = getWebviewContent(panel.webview, rootPath, port);
+        // Listen for the 'webviewReady' handshake from Vue and respond immediately
+        panel.webview.onDidReceiveMessage(
+            async (message) => {
+                if (message.command === 'webviewReady') {
+                    const folders = vscode.workspace.workspaceFolders;
+                    const dynamicPath = folders && folders.length > 0
+                        ? folders[0].uri.fsPath
+                        : rootPath;  // fall back to project root when no folder is open
+                    console.log('Code Audit Librarian: Retrieved workspace path dynamically:', dynamicPath);
+                    // Pong: send the canonical 'setWorkspacePath' command the Vue app listens for
+                    panel.webview.postMessage({ command: 'setWorkspacePath', path: dynamicPath });
+                    // Also send legacy 'setPath' for any other components that may still listen for it
+                    panel.webview.postMessage({ command: 'setPath', payload: dynamicPath });
+                    console.log('Code Audit Librarian: Sent setWorkspacePath pong to Webview.');
+                    console.log('Code Audit Librarian: dynamicPath value:', JSON.stringify(dynamicPath));
+                } else if (message.command === 'openFolderDialog') {
+                    const uri = await vscode.window.showOpenDialog({
+                        canSelectFiles: false,
+                        canSelectFolders: true,
+                        canSelectMany: false,
+                        openLabel: 'Select Project Folder'
+                    });
+                    if (uri && uri[0]) {
+                        panel.webview.postMessage({ type: 'selectedFolder', path: uri[0].fsPath });
+                    }
+                }
+            },
+            null,
+            context.subscriptions
+        );
+
+        // Inject HTML (triggers webview execution and messages)
+        const htmlContent = getWebviewContent(panel.webview, rootPath, port, workspacePath);
         panel.webview.html = htmlContent;
+
+        // Also re-send on visibility change (e.g. user switches tabs and comes back)
+        panel.onDidChangeViewState(() => {
+            if (panel.visible) {
+                const folders = vscode.workspace.workspaceFolders;
+                const dynamicPath = folders && folders.length > 0 ? folders[0].uri.fsPath : "";
+                panel.webview.postMessage({ command: 'setPath', payload: dynamicPath });
+            }
+        }, null, context.subscriptions);
 
         // Cleanup when the webview is closed
         panel.onDidDispose(() => {
@@ -63,7 +101,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(disposable);
 }
 
-function getWebviewContent(webview: vscode.Webview, rootPath: string, port: number) {
+function getWebviewContent(webview: vscode.Webview, rootPath: string, port: number, workspacePath: string) {
     const distPath = path.join(rootPath, 'report', 'frontend', 'dist');
     const indexHtmlPath = path.join(distPath, 'index.html');
 
@@ -84,8 +122,9 @@ function getWebviewContent(webview: vscode.Webview, rootPath: string, port: numb
             return `${attr}="${webviewUri}"`;
         });
 
-        // Inject window.__FLASK_PORT__
-        const injection = `<script>window.__FLASK_PORT__ = ${port};</script>`;
+        // Inject window.__FLASK_PORT__ and window.__WORKSPACE_PATH__
+        const escapedWorkspacePath = workspacePath.replace(/\\/g, '\\\\');
+        const injection = `<script>window.__FLASK_PORT__ = ${port}; window.__WORKSPACE_PATH__ = "${escapedWorkspacePath}";</script>`;
         html = html.replace('</head>', `${injection}\n</head>`);
     } catch (e) {
         html = `<!DOCTYPE html><html><body><h1>Error loading UI</h1><p>Ensure the Vue app is built at report/frontend/dist.</p><p>${e}</p></body></html>`;
