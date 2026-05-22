@@ -34,42 +34,59 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        // Create Webview
+        // Create Webview — dashboard lives in column 2 always
         const panel = vscode.window.createWebviewPanel(
             'codeAuditLibrarian',
             'Code Audit Librarian',
-            vscode.ViewColumn.One,
+            vscode.ViewColumn.Two,
             {
                 enableScripts: true,
                 localResourceRoots: [vscode.Uri.file(path.join(rootPath, 'report', 'frontend', 'dist'))]
             }
         );
 
-        // Listen for the 'webviewReady' handshake from Vue and respond immediately
+        // Central message router — all Webview→Extension communication goes here.
         panel.webview.onDidReceiveMessage(
-            async (message) => {
-                if (message.command === 'webviewReady') {
-                    const folders = vscode.workspace.workspaceFolders;
-                    const dynamicPath = folders && folders.length > 0
-                        ? folders[0].uri.fsPath
-                        : rootPath;  // fall back to project root when no folder is open
-                    console.log('Code Audit Librarian: Retrieved workspace path dynamically:', dynamicPath);
-                    // Pong: send the canonical 'setWorkspacePath' command the Vue app listens for
-                    panel.webview.postMessage({ command: 'setWorkspacePath', path: dynamicPath });
-                    // Also send legacy 'setPath' for any other components that may still listen for it
-                    panel.webview.postMessage({ command: 'setPath', payload: dynamicPath });
-                    console.log('Code Audit Librarian: Sent setWorkspacePath pong to Webview.');
-                    console.log('Code Audit Librarian: dynamicPath value:', JSON.stringify(dynamicPath));
-                } else if (message.command === 'openFolderDialog') {
-                    const uri = await vscode.window.showOpenDialog({
-                        canSelectFiles: false,
-                        canSelectFolders: true,
-                        canSelectMany: false,
-                        openLabel: 'Select Project Folder'
-                    });
-                    if (uri && uri[0]) {
-                        panel.webview.postMessage({ type: 'selectedFolder', path: uri[0].fsPath });
+            async (message: { command: string; payload?: Record<string, unknown> }) => {
+                switch (message.command) {
+                    case 'webviewReady': {
+                        const folders = vscode.workspace.workspaceFolders;
+                        const dynamicPath = folders && folders.length > 0
+                            ? folders[0].uri.fsPath
+                            : rootPath;  // fall back to project root when no folder is open
+                        console.log('Code Audit Librarian: Retrieved workspace path dynamically:', dynamicPath);
+                        // Pong: send the canonical 'setWorkspacePath' command the Vue app listens for
+                        panel.webview.postMessage({ command: 'setWorkspacePath', path: dynamicPath });
+                        // Also send legacy 'setPath' for any other components that may still listen for it
+                        panel.webview.postMessage({ command: 'setPath', payload: dynamicPath });
+                        console.log('Code Audit Librarian: Sent setWorkspacePath pong to Webview.');
+                        console.log('Code Audit Librarian: dynamicPath value:', JSON.stringify(dynamicPath));
+                        break;
                     }
+                    case 'openFolderDialog': {
+                        const uri = await vscode.window.showOpenDialog({
+                            canSelectFiles: false,
+                            canSelectFolders: true,
+                            canSelectMany: false,
+                            openLabel: 'Select Project Folder'
+                        });
+                        if (uri && uri[0]) {
+                            panel.webview.postMessage({ type: 'selectedFolder', path: uri[0].fsPath });
+                        }
+                        break;
+                    }
+                    case 'jumpToCode': {
+                        if (message.payload) {
+                            await handleJumpToCode(message.payload);
+                        }
+                        break;
+                    }
+                    // Future commands slot in here:
+                    // case 'applyAiFix': { await handleApplyAiFix(message.payload); break; }
+                    // case 'rejectFix':  { await handleRejectFix(message.payload);  break; }
+
+                    default:
+                        console.warn(`[CodeAuditLibrarian] Unknown command: ${message.command}`);
                 }
             },
             null,
@@ -134,7 +151,196 @@ function getWebviewContent(webview: vscode.Webview, rootPath: string, port: numb
 }
 
 export function deactivate() {
+    if (highlightDecoration) {
+        highlightDecoration.dispose();
+    }
     if (apiProcess) {
         apiProcess.kill();
     }
+}
+
+// Module-level decoration tracking variable to prevent memory leaks and ghost highlights
+let highlightDecoration: vscode.TextEditorDecorationType | undefined;
+
+/**
+ * Standalone helper to handle jumping to a specific file and line inside the VS Code editor.
+ */
+async function handleJumpToCode(payload: Record<string, unknown>): Promise<void> {
+    const filePath = payload.filePath as string;
+    const lineNumber = payload.lineNumber as number;
+
+    const fileUri = resolveFileUri(filePath);
+    if (!fileUri) {
+        return; // resolveFileUri already showed warning/error message
+    }
+
+    try {
+        const doc = await vscode.workspace.openTextDocument(fileUri);
+        const line = Math.max(0, (lineNumber || 1) - 1); // DB is 1-indexed, VS Code is 0-indexed
+        const range = new vscode.Range(line, 0, line, 0);
+
+        await vscode.window.showTextDocument(doc, {
+            viewColumn: vscode.ViewColumn.One, // file opens in column 1, dashboard stays in column 2
+            selection: range,
+            preserveFocus: false,
+        });
+
+        highlightLine(doc, line);
+    } catch (err) {
+        vscode.window.showErrorMessage(`Could not open: ${filePath}`);
+    }
+}
+
+/**
+ * Collects the names of all immediate subdirectories inside a given directory.
+ * Returns an empty array if the directory cannot be read (permission errors, etc.).
+ */
+function collectSubdirectories(dirPath: string): string[] {
+    try {
+        return fs.readdirSync(dirPath, { withFileTypes: true })
+            .filter(entry => entry.isDirectory())
+            .map(entry => entry.name);
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Resolves a DB-stored relative file path to an absolute vscode.Uri by walking through
+ * a multi-tier fallback chain.
+ *
+ * Resolution order:
+ *  A  — Direct join:          workspaceRoot + relativePath
+ *  B  — Prefix strip (×N):    workspaceRoot + relativePath with leading N segments removed
+ *  C  — Subdir walk:          workspaceRoot/<subdir> + relativePath (1-level deep subfolders)
+ *  D  — Subdir + prefix strip: workspaceRoot/<subdir> + relativePath with leading N segments removed
+ *  E  — Basename fallback:    workspaceRoot + filename only (last resort fuzzy lookup)
+ *
+ * If all strategies fail, shows a diagnostic error toast with the exact Strategy-A
+ * absolute path so the developer can immediately identify the directory layout mismatch.
+ */
+function resolveFileUri(relativePath: string): vscode.Uri | undefined {
+    // ── Guard: require at least one open workspace folder ──────────────────────
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+        vscode.window.showErrorMessage(
+            'No workspace folder is open. Open your project folder in VS Code to use Jump-to-Code.'
+        );
+        return undefined;
+    }
+
+    const workspaceRoot = workspaceFolders[0].uri.fsPath;
+
+    // ── Step 1: Normalize incoming path to OS-native separators ────────────────
+    // Database stores paths with forward slashes; Windows needs backslashes.
+    const normalizedRelative = path.normalize(relativePath.replace(/\//g, path.sep));
+
+    // Pre-split into segments for prefix-stripping strategies
+    const segments = normalizedRelative.split(path.sep).filter(s => s.length > 0);
+    const baseName  = path.basename(normalizedRelative);
+
+    // ── Strategy A: Direct join ────────────────────────────────────────────────
+    // workspaceRoot + relativePath  (e.g. C:\...\Project + app\src\...\File.vue)
+    const strategyAPath = path.join(workspaceRoot, normalizedRelative);
+    if (fs.existsSync(strategyAPath)) {
+        console.log(`[CAL] resolveFileUri ✓ Strategy A: ${strategyAPath}`);
+        return vscode.Uri.file(strategyAPath);
+    }
+
+    // ── Strategy B: Iterative prefix stripping ────────────────────────────────
+    // Tries removing 1, 2, … (N-1) leading segments from the DB path and joining
+    // with workspaceRoot. Handles cases like:
+    //   DB stores  "app/src/…/File.vue"  but workspace root already contains "src/…"
+    for (let strip = 1; strip < segments.length; strip++) {
+        const stripped = segments.slice(strip).join(path.sep);
+        const candidate = path.join(workspaceRoot, stripped);
+        if (fs.existsSync(candidate)) {
+            console.log(`[CAL] resolveFileUri ✓ Strategy B (strip=${strip}): ${candidate}`);
+            return vscode.Uri.file(candidate);
+        }
+    }
+
+    // ── Strategy C: Immediate subdirectory walk ────────────────────────────────
+    // The workspace root may be a "parent" project folder and the actual code lives
+    // inside a subdirectory such as "client/", "frontend/", "src/", etc.
+    // Example: workspaceRoot = C:\…\StudentManagement\StudentManagement
+    //          actual file   = …\StudentManagement\client\app\src\…\File.vue
+    const immediateSubdirs = collectSubdirectories(workspaceRoot);
+    for (const subdir of immediateSubdirs) {
+        const subdirRoot = path.join(workspaceRoot, subdir);
+        const candidate  = path.join(subdirRoot, normalizedRelative);
+        if (fs.existsSync(candidate)) {
+            console.log(`[CAL] resolveFileUri ✓ Strategy C (subdir=${subdir}): ${candidate}`);
+            return vscode.Uri.file(candidate);
+        }
+    }
+
+    // ── Strategy D: Subdirectory walk + prefix stripping ─────────────────────
+    // Combines C and B: walks into each immediate subdir AND tries stripping leading
+    // path segments from the DB path.
+    // Example: workspaceRoot/client + src/…/File.vue  (strips "app" prefix)
+    for (const subdir of immediateSubdirs) {
+        const subdirRoot = path.join(workspaceRoot, subdir);
+        for (let strip = 1; strip < segments.length; strip++) {
+            const stripped  = segments.slice(strip).join(path.sep);
+            const candidate = path.join(subdirRoot, stripped);
+            if (fs.existsSync(candidate)) {
+                console.log(`[CAL] resolveFileUri ✓ Strategy D (subdir=${subdir}, strip=${strip}): ${candidate}`);
+                return vscode.Uri.file(candidate);
+            }
+        }
+    }
+
+    // ── Strategy E: Basename-only fuzzy fallback ──────────────────────────────
+    // Last resort — join just the filename with workspaceRoot in case the file
+    // lives directly at the project root level.
+    const strategyEPath = path.join(workspaceRoot, baseName);
+    if (fs.existsSync(strategyEPath)) {
+        console.log(`[CAL] resolveFileUri ✓ Strategy E (basename): ${strategyEPath}`);
+        return vscode.Uri.file(strategyEPath);
+    }
+
+    // ── Total failure — diagnostic toast ─────────────────────────────────────
+    // Surface the exact Strategy-A path so the developer can immediately see
+    // the directory-layout mismatch in the VS Code notification popup.
+    console.error(`[CAL] resolveFileUri ✗ All strategies exhausted for: "${relativePath}"`);
+    console.error(`[CAL]   Strategy A checked: ${strategyAPath}`);
+    console.error(`[CAL]   Workspace root    : ${workspaceRoot}`);
+    vscode.window.showErrorMessage(
+        `File not found at: ${strategyAPath}` +
+        `\n\nWorkspace root: ${workspaceRoot}` +
+        `\nDB path queried: ${relativePath}` +
+        `\n\nMake sure the open workspace folder matches the audited project root.`
+    );
+    return undefined;
+}
+
+/**
+ * Temporarily highlights a target line using editor.findMatchHighlightBackground.
+ */
+function highlightLine(doc: vscode.TextDocument, zeroIndexedLine: number): void {
+    // Dispose any previous highlight before creating a new one
+    if (highlightDecoration) {
+        highlightDecoration.dispose();
+    }
+
+    highlightDecoration = vscode.window.createTextEditorDecorationType({
+        backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
+        isWholeLine: true,
+    });
+
+    const editor = vscode.window.visibleTextEditors.find(
+        e => e.document.uri.fsPath === doc.uri.fsPath
+    );
+    if (!editor) {
+        return;
+    }
+
+    const range = new vscode.Range(zeroIndexedLine, 0, zeroIndexedLine, 0);
+    editor.setDecorations(highlightDecoration, [range]);
+
+    setTimeout(() => {
+        highlightDecoration?.dispose();
+        highlightDecoration = undefined;
+    }, 2000);
 }

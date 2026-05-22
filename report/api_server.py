@@ -176,19 +176,56 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return dict(row) if row else {}
 
 
+def _resolve_absolute_path(file_path: str) -> Optional[Path]:
+    """
+    Resolve absolute path of file dynamically across potential project bases on Windows.
+    """
+    # Normalize slashes
+    file_path = file_path.replace("\\", "/")
+    
+    candidates = []
+    
+    # 1. Try absolute path directly
+    candidates.append(Path(file_path))
+    
+    # 2. Try relative to current BASE_PATH
+    if BASE_PATH:
+        base = Path(BASE_PATH)
+        candidates.append(base / file_path)
+        candidates.append(base.parent / file_path)
+        candidates.append(base.parent.parent / file_path)
+        
+    # 3. Try relative to PROJECT_ROOT and its parent (Desktop)
+    if PROJECT_ROOT:
+        candidates.append(PROJECT_ROOT / file_path)
+        desktop = PROJECT_ROOT.parent
+        candidates.append(desktop / file_path)
+        
+        # Try appending starting directory segment to the desktop base path
+        parts = Path(file_path).parts
+        if parts:
+            candidates.append(desktop / parts[0] / file_path)
+            
+    # Check all candidates
+    for p in candidates:
+        try:
+            if p.exists() and p.is_file():
+                return p.resolve()
+        except Exception:
+            continue
+            
+    return None
+
+
 def _extract_snippet(file_path: str, line_number: int) -> str:
     """
     Extract a 5-line code snippet (2 lines above, target line, 2 lines below).
     Target line is marked with ► prefix.
     """
     try:
-        # Try absolute path first
-        path = Path(file_path)
-        if not path.exists() and BASE_PATH:
-            # Try relative to base_path
-            path = Path(BASE_PATH) / file_path
+        path = _resolve_absolute_path(file_path)
         
-        if not path.exists():
+        if not path or not path.exists():
             return f"[File not found: {file_path}]"
         
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -213,8 +250,13 @@ def _extract_snippet(file_path: str, line_number: int) -> str:
 def _get_run_id(conn: sqlite3.Connection, project_name: str) -> Optional[int]:
     """Resolve run_id from query param or fall back to most recent completed run."""
     run_id_param = request.args.get("run_id")
-    if run_id_param and str(run_id_param).isdigit():
-        return int(run_id_param)
+    try:
+        run_id = int(run_id_param) if run_id_param else None
+    except ValueError:
+        run_id = None
+
+    if run_id is not None:
+        return run_id
 
     # Fall back: most recent completed run globally (not filtered by project_name,
     # since the config project_name can change between runs)
@@ -232,6 +274,58 @@ def _get_run_id(conn: sqlite3.Connection, project_name: str) -> Optional[int]:
         return row["id"]
 
     return None
+
+
+def _resolve_db_file_path(conn: sqlite3.Connection, run_id: int, file_path: str) -> str:
+    """
+    Defensively normalize and map input file_path (even if absolute system path)
+    to a stored workspace-relative path segment in database vue_files table.
+    """
+    if not file_path:
+        return file_path
+
+    # Standardize to forward slashes and strip leading/trailing slashes
+    norm_path = file_path.replace("\\", "/").strip("/")
+
+    # 1. Exact match on raw path
+    row = conn.execute(
+        "SELECT file_path FROM vue_files WHERE run_id = ? AND file_path = ?",
+        (run_id, file_path)
+    ).fetchone()
+    if row:
+        return row["file_path"]
+
+    # 2. Exact match on standardized norm_path
+    row = conn.execute(
+        "SELECT file_path FROM vue_files WHERE run_id = ? AND file_path = ?",
+        (run_id, norm_path)
+    ).fetchone()
+    if row:
+        return row["file_path"]
+
+    # 3. Check for suffix or parent mapping against all DB paths in the same run
+    all_files = conn.execute(
+        "SELECT file_path FROM vue_files WHERE run_id = ?",
+        (run_id,)
+    ).fetchall()
+
+    for r in all_files:
+        db_path = r["file_path"]
+        db_norm = db_path.replace("\\", "/").strip("/")
+        
+        # Check if one path is a suffix of the other (absolute paths are longer suffixes of relative paths)
+        if norm_path.endswith(db_norm) or db_norm.endswith(norm_path):
+            return db_path
+
+    # 4. Fallback case-insensitive suffix mapping
+    for r in all_files:
+        db_path = r["file_path"]
+        db_norm = db_path.replace("\\", "/").strip("/").lower()
+        if norm_path.lower().endswith(db_norm) or db_norm.endswith(norm_path.lower()):
+            return db_path
+
+    # Final resort fallback
+    return file_path.replace("\\", "/")
 
 @app.route("/api/recent-audits", methods=["GET"])
 def get_recent_audits():
@@ -515,17 +609,33 @@ def get_files():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/file-metrics", methods=["GET"])
 @app.route("/api/file-metrics/<path:file_path>", methods=["GET"])
-def get_file_metrics(file_path: str):
+def get_file_metrics(file_path: str = None):
     """
     GET /api/file-metrics/<path:file_path>
     Returns full metrics row for a file.
     """
+    file_path = request.args.get("file_path") or file_path
+    if not file_path:
+        return jsonify({"error": "Missing file_path"}), 400
+    file_path = file_path.replace("\\", "/")
+    
+    run_id_arg = request.args.get('run_id')
+    try:
+        run_id = int(run_id_arg) if run_id_arg else None
+    except ValueError:
+        run_id = None
+
     try:
         conn = _db_connect()
-        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            run_id = _get_run_id(conn, PROJECT_NAME)
         if run_id is None:
             return jsonify({"error": "No audit runs found"}), 404
+            
+        file_path = _resolve_db_file_path(conn, run_id, file_path)
+
         row = conn.execute(
             """
             SELECT * FROM vue_files
@@ -545,17 +655,32 @@ def get_file_metrics(file_path: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/file-api-calls", methods=["GET"])
 @app.route("/api/file-api-calls/<path:file_path>", methods=["GET"])
-def get_file_api_calls(file_path: str):
+def get_file_api_calls(file_path: str = None):
     """
     GET /api/file-api-calls/<path:file_path>
     Returns all API calls for a file with dynamically generated code snippets.
     """
+    file_path = request.args.get("file_path") or file_path
+    if not file_path:
+        return jsonify({"error": "Missing file_path"}), 400
+    file_path = file_path.replace("\\", "/")
+    
+    run_id_arg = request.args.get('run_id')
+    try:
+        run_id = int(run_id_arg) if run_id_arg else None
+    except ValueError:
+        run_id = None
+
     try:
         conn = _db_connect()
-        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            run_id = _get_run_id(conn, PROJECT_NAME)
         if run_id is None:
             return jsonify([])
+            
+        file_path = _resolve_db_file_path(conn, run_id, file_path)
 
         rows = conn.execute(
             """
@@ -582,17 +707,32 @@ def get_file_api_calls(file_path: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/file-accessibility", methods=["GET"])
 @app.route("/api/file-accessibility/<path:file_path>", methods=["GET"])
-def get_file_accessibility(file_path: str):
+def get_file_accessibility(file_path: str = None):
     """
     GET /api/file-accessibility/<path:file_path>
     Returns accessibility defects with WCAG metadata and code snippets.
     """
+    file_path = request.args.get("file_path") or file_path
+    if not file_path:
+        return jsonify({"error": "Missing file_path"}), 400
+    file_path = file_path.replace("\\", "/")
+    
+    run_id_arg = request.args.get('run_id')
+    try:
+        run_id = int(run_id_arg) if run_id_arg else None
+    except ValueError:
+        run_id = None
+
     try:
         conn = _db_connect()
-        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            run_id = _get_run_id(conn, PROJECT_NAME)
         if run_id is None:
             return jsonify([])
+            
+        file_path = _resolve_db_file_path(conn, run_id, file_path)
 
         rows = conn.execute(
             """
@@ -631,17 +771,32 @@ def get_file_accessibility(file_path: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/file-eslint", methods=["GET"])
 @app.route("/api/file-eslint/<path:file_path>", methods=["GET"])
-def get_file_eslint(file_path: str):
+def get_file_eslint(file_path: str = None):
     """
     GET /api/file-eslint/<path:file_path>
     Returns ESLint flags (non-accessibility) with code snippets.
     """
+    file_path = request.args.get("file_path") or file_path
+    if not file_path:
+        return jsonify({"error": "Missing file_path"}), 400
+    file_path = file_path.replace("\\", "/")
+    
+    run_id_arg = request.args.get('run_id')
+    try:
+        run_id = int(run_id_arg) if run_id_arg else None
+    except ValueError:
+        run_id = None
+
     try:
         conn = _db_connect()
-        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            run_id = _get_run_id(conn, PROJECT_NAME)
         if run_id is None:
             return jsonify([])
+            
+        file_path = _resolve_db_file_path(conn, run_id, file_path)
 
         rows = conn.execute(
             """
@@ -667,17 +822,32 @@ def get_file_eslint(file_path: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/file-ai-issues", methods=["GET"])
 @app.route("/api/file-ai-issues/<path:file_path>", methods=["GET"])
-def get_file_ai_issues(file_path: str):
+def get_file_ai_issues(file_path: str = None):
     """
     GET /api/file-ai-issues/<path:file_path>
     Returns LLM-generated issues (code snippets already in database).
     """
+    file_path = request.args.get("file_path") or file_path
+    if not file_path:
+        return jsonify({"error": "Missing file_path"}), 400
+    file_path = file_path.replace("\\", "/")
+    
+    run_id_arg = request.args.get('run_id')
+    try:
+        run_id = int(run_id_arg) if run_id_arg else None
+    except ValueError:
+        run_id = None
+
     try:
         conn = _db_connect()
-        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            run_id = _get_run_id(conn, PROJECT_NAME)
         if run_id is None:
             return jsonify([])
+            
+        file_path = _resolve_db_file_path(conn, run_id, file_path)
 
         rows = conn.execute(
             """
@@ -878,17 +1048,33 @@ def get_transitive_dependents(run_id: int, file_path: str) -> list:
     return list(visited)
 
 
+@app.route("/api/file-dependencies", methods=["GET"])
 @app.route("/api/file-dependencies/<path:file_path>", methods=["GET"])
-def get_file_dependencies(file_path: str):
+def get_file_dependencies(file_path: str = None):
     """
     GET /api/file-dependencies/<path:file_path>
     Returns dependency metrics for one specific file, including transitive impact.
     """
+    file_path = request.args.get("file_path") or file_path
+    if not file_path:
+        return jsonify({"error": "Missing file_path"}), 400
+    file_path = file_path.replace("\\", "/")
+    
+    run_id_arg = request.args.get('run_id')
+    try:
+        run_id = int(run_id_arg) if run_id_arg else None
+    except ValueError:
+        run_id = None
+
     try:
         conn = _db_connect()
-        run_id = _get_run_id(conn, PROJECT_NAME)
+        if run_id is None:
+            run_id = _get_run_id(conn, PROJECT_NAME)
         if run_id is None:
             return jsonify({"error": "No audit runs found"}), 404
+            
+        file_path = _resolve_db_file_path(conn, run_id, file_path)
+
         row = conn.execute(
             """
             SELECT * FROM vue_files

@@ -288,7 +288,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { filesAPI } from '../api.js'
 
@@ -316,9 +316,11 @@ const getCategoryPercentage = (val) => {
   return Math.round((val || 0) / total * 100)
 }
 
+const currentRunId = computed(() => Number(route.query.run_id));
+
 const fetchDashboardData = async () => {
   loading.value = true; error.value = null
-  const runId = route.query.run_id
+  const runId = currentRunId.value
   try {
     const [summaryRes, executiveRes, offendersRes] = await Promise.all([
       filesAPI.getSummary(runId), filesAPI.getExecutiveSummary(runId), filesAPI.getWorstOffenders(10, runId)
@@ -339,13 +341,13 @@ const fetchDashboardData = async () => {
 const getFileName = (p) => p ? p.split('/').pop() : ''
 const navigateToFile = (p) => {
   const q = { file: p }
-  if (route.query.run_id) q.run_id = route.query.run_id
+  if (currentRunId.value) q.run_id = currentRunId.value
   router.push({ path: '/audit', query: q })
 }
 
 onMounted(fetchDashboardData)
 
-watch(() => route.query.run_id, () => {
+watch(currentRunId, () => {
   fetchDashboardData()
 })
 </script>

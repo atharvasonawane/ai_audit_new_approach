@@ -92,7 +92,7 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
       </button>
 
-      <FileDetailView v-if="selectedFilePath" :filePath="selectedFilePath" />
+      <FileDetailView v-if="selectedFilePath" :filePath="selectedFilePath" :runId="currentRunId" />
       <div v-else class="h-full flex flex-col items-center justify-center gap-5 p-10 text-center">
         <div class="flex flex-col items-center gap-4">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="text-gray-400 dark:text-gray-600">
@@ -115,9 +115,11 @@ import { useRoute } from 'vue-router'
 import { filesAPI } from '../api.js'
 import FileDetailView from '../components/FileDetailView.vue'
 import { useSearch } from '../composables/useSearch'
+import { useVsCode } from '../composables/useVsCode.js'
 
 const route = useRoute()
 const { searchQuery } = useSearch()
+const { jumpToCode } = useVsCode()
 const files = ref([])
 const loading = ref(false)
 const error = ref(null)
@@ -173,8 +175,10 @@ const getIssueBadgeClass = (f) => {
   return 'badge-high'
 }
 
+const currentRunId = computed(() => Number(route.query.run_id));
+
 const fetchFiles = async () => {
-  const runId = route.query.run_id
+  const runId = currentRunId.value
   loading.value = true; error.value = null
   try {
     const res = await filesAPI.getFiles(runId)
@@ -191,7 +195,7 @@ const selectFile = (file) => {
 
 onMounted(fetchFiles)
 
-watch(() => route.query.run_id, () => {
+watch(currentRunId, () => {
   fetchFiles()
 })
 

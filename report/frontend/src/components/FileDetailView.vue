@@ -115,12 +115,22 @@
               <div v-for="(issue, i) in aiIssues" :key="i" class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 transition-all duration-300 ease-out hover:border-gray-300 dark:hover:border-gray-700 hover:-translate-y-0.5 hover:shadow-md dark:hover:bg-gray-800/80">
                 <div class="flex items-start justify-between gap-3 mb-2.5">
                   <div class="text-[13px] font-bold text-gray-900 dark:text-gray-50 leading-[1.4]">{{ issue.issue_title || 'Untitled Issue' }}</div>
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-[0.04em] uppercase shrink-0 border"
-                        :class="{
-                          'bg-red-100 text-red-500 border-red-500/30 dark:bg-red-500/10 dark:text-red-400': getSeverityClass(issue.severity) === 'badge-high',
-                          'bg-amber-100 text-amber-500 border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400': getSeverityClass(issue.severity) === 'badge-med',
-                          'bg-emerald-100 text-emerald-500 border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400': getSeverityClass(issue.severity) === 'badge-low'
-                        }">{{ issue.severity || 'Low' }}</span>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button
+                      v-if="issue.line_number || issue.lineNumber"
+                      @click.stop="jumpToCode(issue.file_path || issue.filePath || filePath, issue.line_number || issue.lineNumber)"
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors duration-150 ease-in-out select-none cursor-pointer"
+                    >
+                      <svg class="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                      Open in Editor
+                    </button>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-[0.04em] uppercase shrink-0 border"
+                          :class="{
+                            'bg-red-100 text-red-500 border-red-500/30 dark:bg-red-500/10 dark:text-red-400': getSeverityClass(issue.severity) === 'badge-high',
+                            'bg-amber-100 text-amber-500 border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400': getSeverityClass(issue.severity) === 'badge-med',
+                            'bg-emerald-100 text-emerald-500 border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400': getSeverityClass(issue.severity) === 'badge-low'
+                          }">{{ issue.severity || 'Low' }}</span>
+                  </div>
                 </div>
                 <p class="text-[13px] text-gray-600 dark:text-gray-300 leading-[1.6] m-0 mb-2.5">{{ issue.description }}</p>
                 <div class="mb-2.5">
@@ -144,12 +154,22 @@
               <div v-for="(flag, i) in eslintFlags" :key="i" class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 transition-all duration-300 ease-out hover:border-gray-300 dark:hover:border-gray-700 hover:-translate-y-0.5 hover:shadow-md dark:hover:bg-gray-800/80">
                 <div class="flex items-start justify-between gap-3 mb-2.5">
                   <div class="text-[12px] font-bold text-gray-900 dark:text-gray-50 leading-[1.4] font-mono">{{ flag.rule || 'Unknown Rule' }}</div>
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-[0.04em] uppercase shrink-0 border"
-                        :class="{
-                          'bg-red-100 text-red-500 border-red-500/30 dark:bg-red-500/10 dark:text-red-400': getSeverityClass(flag.severity) === 'badge-high',
-                          'bg-amber-100 text-amber-500 border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400': getSeverityClass(flag.severity) === 'badge-med',
-                          'bg-emerald-100 text-emerald-500 border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400': getSeverityClass(flag.severity) === 'badge-low'
-                        }">{{ flag.severity || 'Low' }}</span>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button
+                      v-if="flag.line_number || flag.lineNumber"
+                      @click.stop="jumpToCode(flag.file_path || flag.filePath || filePath, flag.line_number || flag.lineNumber)"
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors duration-150 ease-in-out select-none cursor-pointer"
+                    >
+                      <svg class="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                      Open in Editor
+                    </button>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-[0.04em] uppercase shrink-0 border"
+                          :class="{
+                            'bg-red-100 text-red-500 border-red-500/30 dark:bg-red-500/10 dark:text-red-400': getSeverityClass(flag.severity) === 'badge-high',
+                            'bg-amber-100 text-amber-500 border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400': getSeverityClass(flag.severity) === 'badge-med',
+                            'bg-emerald-100 text-emerald-500 border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400': getSeverityClass(flag.severity) === 'badge-low'
+                          }">{{ flag.severity || 'Low' }}</span>
+                  </div>
                 </div>
                 <p class="text-[13px] text-gray-600 dark:text-gray-300 leading-[1.6] m-0 mb-2.5">{{ flag.message }}</p>
                 <div class="mb-2.5">
@@ -173,7 +193,17 @@
               <div v-for="(defect, i) in accessibilityDefects" :key="i" class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 transition-all duration-300 ease-out hover:border-gray-300 dark:hover:border-gray-700 hover:-translate-y-0.5 hover:shadow-md dark:hover:bg-gray-800/80">
                 <div class="flex items-start justify-between gap-3 mb-2.5">
                   <div class="text-[12px] font-bold text-gray-900 dark:text-gray-50 leading-[1.4] font-mono">{{ defect.rule || 'Unknown Rule' }}</div>
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-[0.04em] uppercase shrink-0 border bg-amber-100 text-amber-500 border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">A11y</span>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button
+                      v-if="defect.line_number || defect.lineNumber"
+                      @click.stop="jumpToCode(defect.file_path || defect.filePath || filePath, defect.line_number || defect.lineNumber)"
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors duration-150 ease-in-out select-none cursor-pointer"
+                    >
+                      <svg class="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                      Open in Editor
+                    </button>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-[0.04em] uppercase shrink-0 border bg-amber-100 text-amber-500 border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">A11y</span>
+                  </div>
                 </div>
                 <p class="text-[13px] text-gray-600 dark:text-gray-300 leading-[1.6] m-0 mb-2.5">{{ defect.message }}</p>
                 <div v-if="defect.wcag_criterion" class="flex items-center gap-2 py-2 px-2.5 bg-amber-500/10 border border-amber-500/15 rounded-lg mb-2.5">
@@ -201,7 +231,17 @@
               <div v-for="(call, i) in apiCalls" :key="i" class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 transition-all duration-300 ease-out hover:border-gray-300 dark:hover:border-gray-700 hover:-translate-y-0.5 hover:shadow-md dark:hover:bg-gray-800/80">
                 <div class="flex items-start justify-between gap-3 mb-2.5">
                   <div class="text-[12px] font-bold text-gray-900 dark:text-gray-50 leading-[1.4] font-mono">{{ call.method }} {{ call.endpoint }}</div>
-                  <span v-if="call.in_loop" class="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-[0.04em] uppercase shrink-0 border bg-red-100 text-red-500 border-red-500/30 dark:bg-red-500/10 dark:text-red-400">IN LOOP</span>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button
+                      v-if="call.line_number || call.lineNumber"
+                      @click.stop="jumpToCode(call.file_path || call.filePath || filePath, call.line_number || call.lineNumber)"
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors duration-150 ease-in-out select-none cursor-pointer"
+                    >
+                      <svg class="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                      Open in Editor
+                    </button>
+                    <span v-if="call.in_loop" class="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-[0.04em] uppercase shrink-0 border bg-red-100 text-red-500 border-red-500/30 dark:bg-red-500/10 dark:text-red-400">IN LOOP</span>
+                  </div>
                 </div>
                 <div class="mb-2.5">
                   <span class="inline-flex items-center gap-1 font-mono text-[10px] text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-md">Line {{ call.line_number || 'N/A' }}</span>
@@ -221,9 +261,15 @@ import { ref, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { filesAPI } from '../api.js'
 import CodeSnippet from './CodeSnippet.vue'
+import { useVsCode } from '../composables/useVsCode.js'
 
-const props = defineProps({ filePath: { type: String, required: true } })
+const props = defineProps({
+  filePath: { type: String, required: true },
+  runId: { type: Number, required: false }
+})
 const route = useRoute()
+
+const { jumpToCode } = useVsCode()
 
 const loading = ref(false)
 const error = ref(null)
@@ -254,17 +300,15 @@ const getSeverityClass = (s) => {
   return 'badge-low'
 }
 
-const fetchFileData = async () => {
-  if (!props.filePath) return
-  const runId = route.query.run_id
+const loadIssuesForFile = async (newPath, newRun) => {
   loading.value = true; error.value = null
   try {
     const [metricsRes, aiRes, eslintRes, a11yRes, apiRes] = await Promise.all([
-      filesAPI.getFileMetrics(props.filePath, runId),
-      filesAPI.getFileAIIssues(props.filePath, runId),
-      filesAPI.getFileESLint(props.filePath, runId),
-      filesAPI.getFileAccessibility(props.filePath, runId),
-      filesAPI.getFileAPICalls(props.filePath, runId)
+      filesAPI.getFileMetrics(newPath, newRun),
+      filesAPI.getFileAIIssues(newPath, newRun),
+      filesAPI.getFileESLint(newPath, newRun),
+      filesAPI.getFileAccessibility(newPath, newRun),
+      filesAPI.getFileAPICalls(newPath, newRun)
     ])
     metrics.value = metricsRes.data || {}
     aiIssues.value = aiRes.data || []
@@ -276,6 +320,19 @@ const fetchFileData = async () => {
   } finally { loading.value = false }
 }
 
-watch(() => props.filePath, (p) => { if (p) fetchFileData() }, { immediate: true })
-watch(() => route.query.run_id, () => { if (props.filePath) fetchFileData() })
+const fetchFileData = () => {
+  if (props.filePath && props.runId) {
+    loadIssuesForFile(props.filePath, props.runId)
+  }
+}
+
+watch(
+  () => [props.filePath, props.runId],
+  ([newPath, newRun]) => {
+    if (newPath && newRun) {
+      loadIssuesForFile(newPath, newRun);
+    }
+  },
+  { immediate: true }
+);
 </script>

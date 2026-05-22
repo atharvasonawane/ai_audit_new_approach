@@ -55,19 +55,19 @@ export const filesAPI = {
   getFiles: (runId) => api.get(getRunQuery('/files', runId)),
   
   // Get file metrics
-  getFileMetrics: (filePath, runId) => api.get(getRunQuery(`/file-metrics/${filePath}`, runId)),
+  getFileMetrics: (filePath, runId) => api.get(getRunQuery(`/file-metrics?file_path=${encodeURIComponent(filePath)}`, runId)),
   
   // Get file AI issues
-  getFileAIIssues: (filePath, runId) => api.get(getRunQuery(`/file-ai-issues/${filePath}`, runId)),
+  getFileAIIssues: (filePath, runId) => api.get(getRunQuery(`/file-ai-issues?file_path=${encodeURIComponent(filePath)}`, runId)),
   
   // Get file ESLint flags
-  getFileESLint: (filePath, runId) => api.get(getRunQuery(`/file-eslint/${filePath}`, runId)),
+  getFileESLint: (filePath, runId) => api.get(getRunQuery(`/file-eslint?file_path=${encodeURIComponent(filePath)}`, runId)),
   
   // Get file accessibility defects
-  getFileAccessibility: (filePath, runId) => api.get(getRunQuery(`/file-accessibility/${filePath}`, runId)),
+  getFileAccessibility: (filePath, runId) => api.get(getRunQuery(`/file-accessibility?file_path=${encodeURIComponent(filePath)}`, runId)),
   
   // Get file API calls
-  getFileAPICalls: (filePath, runId) => api.get(getRunQuery(`/file-api-calls/${filePath}`, runId)),
+  getFileAPICalls: (filePath, runId) => api.get(getRunQuery(`/file-api-calls?file_path=${encodeURIComponent(filePath)}`, runId)),
   
   // Get project summary
   getSummary: (runId) => api.get(getRunQuery('/summary', runId)),
@@ -85,7 +85,7 @@ export const filesAPI = {
   getDependencyGraph: (runId) => api.get(getRunQuery('/dependency-graph', runId)),
 
   // Get dependency data for a specific file
-  getFileDependencies: (filePath, runId) => api.get(getRunQuery(`/file-dependencies/${filePath}`, runId)),
+  getFileDependencies: (filePath, runId) => api.get(getRunQuery(`/file-dependencies?file_path=${encodeURIComponent(filePath)}`, runId)),
 }
 
 export default api
