@@ -1,13 +1,14 @@
 <template>
   <nav class="flex items-center justify-between px-6 h-[56px] shrink-0 gap-6 bg-white/80 dark:bg-gray-950/80 backdrop-blur-[10px] border-b border-gray-200 dark:border-gray-800">
-    <div class="flex items-center gap-4 flex-1">
+    <div class="flex items-center gap-4 flex-1 transition-all duration-300" :class="{ 'pl-8': isCollapsed }">
       <div class="flex items-center gap-2 text-[13px]">
         <span class="font-medium transition-colors duration-200 text-gray-500 dark:text-gray-400">Code Audit</span>
         <span class="text-[12px] text-gray-400 dark:text-gray-500">/</span>
         <span class="font-medium transition-colors duration-200 text-gray-900 dark:text-white">{{ pageTitle }}</span>
       </div>
     </div>
-
+    
+    <!-- Right Actions -->
     <div class="flex items-center gap-4">
       <div class="relative flex items-center">
         <svg class="absolute left-3 w-4 h-4 text-gray-500 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -55,11 +56,13 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTheme } from '../composables/useTheme'
 import { useSearch } from '../composables/useSearch'
+import { useSidebar } from '../composables/useSidebar'
 
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
 const { searchQuery } = useSearch()
+const { isCollapsed } = useSidebar()
 
 const pageTitle = computed(() => {
   const titles = {

@@ -41,20 +41,35 @@
           <div
             v-for="(audit, i) in recentAudits"
             :key="i"
-            class="p-4 bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-xl cursor-pointer transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-800/80"
+            class="p-4 bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800/50 rounded-xl cursor-pointer transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-md hover:bg-gray-50 dark:hover:bg-gray-800/80 group"
             @click="navigateToDashboard(audit.id)"
           >
-            <div class="flex items-center justify-between mb-2 gap-2">
-              <span class="text-[14px] font-bold tracking-[-0.01em] text-gray-900 dark:text-gray-100">{{ audit.project_name || 'Code Audit' }}</span>
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold py-0.5 px-2 rounded-md tracking-[0.05em] uppercase shrink-0"
-                    :class="{
-                      'text-emerald-500 bg-emerald-500/10': audit.status === 'completed',
-                      'text-amber-500 bg-amber-500/10': audit.status === 'in_progress',
-                      'text-red-500 bg-red-500/10': audit.status === 'failed'
-                    }">
-                <span class="w-1 h-1 rounded-full bg-current"></span>
-                {{ getStatusText(audit.status) }}
-              </span>
+            <div class="flex items-start justify-between mb-2 gap-2">
+              <div class="flex flex-col gap-1 min-w-0 flex-1">
+                <span class="text-[14px] font-bold tracking-[-0.01em] text-gray-900 dark:text-gray-100 truncate" :title="audit.project_name || 'Code Audit'">{{ audit.project_name || 'Code Audit' }}</span>
+                <div>
+                  <span class="inline-flex items-center gap-1 text-[10px] font-bold py-0.5 px-2 rounded-md tracking-[0.05em] uppercase shrink-0"
+                        :class="{
+                          'text-emerald-500 bg-emerald-500/10': audit.status === 'completed',
+                          'text-amber-500 bg-amber-500/10': audit.status === 'in_progress',
+                          'text-red-500 bg-red-500/10': audit.status === 'failed'
+                        }">
+                    <span class="w-1 h-1 rounded-full bg-current"></span>
+                    {{ getStatusText(audit.status) }}
+                  </span>
+                </div>
+              </div>
+              <button
+                v-if="audit.id"
+                class="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-red-500/10 dark:hover:bg-red-500/20 transition-all duration-200 shrink-0 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+                title="Delete this scan"
+                @click.stop="triggerDelete(audit)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </button>
             </div>
             <div class="font-mono text-[11px] mb-2.5 text-gray-500 dark:text-gray-400">{{ formatDate(audit.started_at) }}</div>
             <div class="flex gap-3">
@@ -191,6 +206,59 @@
         </div>
       </div>
     </div>
+
+    <!-- Custom Confirmation Modal -->
+    <div
+      v-if="showDeleteModal"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
+    >
+      <!-- Backdrop blur overlay -->
+      <div 
+        class="absolute inset-0 bg-gray-950/40 dark:bg-black/60 backdrop-blur-sm"
+        @click="cancelDelete"
+      ></div>
+      
+      <!-- Modal card content with scaling entry animation -->
+      <div 
+        class="relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl w-full max-w-[400px] p-6 overflow-hidden transform scale-100 transition-all duration-300 animate-in zoom-in-95 duration-200"
+      >
+        <div class="flex flex-col gap-4">
+          <!-- Warning Icon & Title -->
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center bg-red-500/10 dark:bg-red-500/20 text-red-500 shrink-0">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+            <h3 class="text-[16px] font-bold text-gray-950 dark:text-gray-50 m-0">Confirm Deletion</h3>
+          </div>
+          
+          <!-- Warning Description -->
+          <p class="text-[13px] leading-[1.5] text-gray-600 dark:text-gray-400 m-0">
+            Are you sure you want to delete the audit scan for <span class="font-bold text-gray-900 dark:text-gray-100">"{{ auditToDelete?.project_name || 'Code Audit' }}"</span>?<br><br>
+            This action is permanent and will completely delete the scan results, AI metrics, and lint counts from both the dashboard and database.
+          </p>
+          
+          <!-- Action Buttons -->
+          <div class="flex gap-3 mt-2">
+            <button 
+              class="flex-1 py-2 px-4 bg-gray-100 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100"
+              @click="cancelDelete"
+            >
+              Cancel
+            </button>
+            <button 
+              class="flex-1 py-2 px-4 bg-red-600 dark:bg-red-500 hover:bg-red-700 dark:hover:bg-red-600 text-white rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 shadow-lg shadow-red-500/10 hover:shadow-red-500/20"
+              @click="confirmDelete"
+            >
+              Delete Scan
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -212,6 +280,39 @@ const folderInput = ref(null)
 const isAnalyzing = ref(false)
 const scanSuccess = ref('')
 const scanError = ref('')
+
+// Delete Audit states
+const showDeleteModal = ref(false)
+const auditToDelete = ref(null)
+
+const triggerDelete = (audit) => {
+  auditToDelete.value = audit
+  showDeleteModal.value = true
+}
+
+const cancelDelete = () => {
+  showDeleteModal.value = false
+  auditToDelete.value = null
+}
+
+const confirmDelete = async () => {
+  if (!auditToDelete.value || !auditToDelete.value.id) return
+  
+  const id = auditToDelete.value.id
+  showDeleteModal.value = false
+  auditToDelete.value = null
+  
+  try {
+    loading.value = true
+    await filesAPI.deleteRecentAudit(id)
+    await fetchRecentAudits()
+  } catch (err) {
+    console.error('Error deleting audit:', err)
+    alert(err.response?.data?.error || 'Failed to delete the audit.')
+  } finally {
+    loading.value = false
+  }
+}
 
 const handleFolderSelect = (e) => {
   const files = e.target.files

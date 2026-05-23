@@ -171,6 +171,15 @@ def _db_connect() -> sqlite3.Connection:
     return conn
 
 
+def _db_connect_rw() -> sqlite3.Connection:
+    """Create a read-write database connection with pragmas enabled."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    return conn
+
+
 def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     """Convert sqlite3.Row to dictionary."""
     return dict(row) if row else {}
@@ -326,6 +335,34 @@ def _resolve_db_file_path(conn: sqlite3.Connection, run_id: int, file_path: str)
 
     # Final resort fallback
     return file_path.replace("\\", "/")
+
+
+@app.route("/api/recent-audits/<int:run_id>", methods=["DELETE"])
+def delete_recent_audit(run_id):
+    """
+    DELETE /api/recent-audits/<int:run_id>
+    Deletes the audit run and all cascading dependency tables.
+    """
+    try:
+        conn = _db_connect_rw()
+        
+        # Check if the audit run exists
+        run = conn.execute("SELECT id FROM audit_runs WHERE id = ?", (run_id,)).fetchone()
+        if not run:
+            conn.close()
+            return jsonify({"error": f"Audit run with ID {run_id} not found"}), 404
+            
+        # Execute the delete statement
+        conn.execute("DELETE FROM audit_runs WHERE id = ?", (run_id,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"message": f"Successfully deleted audit run {run_id} and all related records."}), 200
+        
+    except Exception as e:
+        logger.error(f"Error during deletion of run {run_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/recent-audits", methods=["GET"])
 def get_recent_audits():

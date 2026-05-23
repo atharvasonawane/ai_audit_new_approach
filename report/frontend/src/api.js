@@ -51,6 +51,9 @@ export const filesAPI = {
   // Get recent audits
   getRecentAudits: () => api.get('/recent-audits'),
 
+  // Delete a recent audit run
+  deleteRecentAudit: (runId) => api.delete(`/recent-audits/${runId}`),
+
   // Get all files
   getFiles: (runId) => api.get(getRunQuery('/files', runId)),
   

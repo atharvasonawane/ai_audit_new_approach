@@ -1,30 +1,23 @@
 <template>
-  <aside class="w-[240px] min-w-[240px] h-screen bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800 flex flex-col relative overflow-y-auto">
+  <aside class="w-full h-screen bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800 flex flex-col relative overflow-y-auto">
     <!-- Logo Section -->
     <div class="px-4 py-5 border-b border-gray-200 dark:border-gray-800 shrink-0">
-      <div class="flex items-center gap-3">
-        <div class="w-9 h-9 flex items-center justify-center shrink-0">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
-            <rect x="3" y="3" width="8" height="8" rx="1.5" fill="url(#grad1)"/>
-            <rect x="13" y="3" width="8" height="8" rx="1.5" fill="url(#grad2)"/>
-            <rect x="3" y="13" width="8" height="8" rx="1.5" fill="url(#grad1)" opacity="0.6"/>
-            <rect x="13" y="13" width="8" height="8" rx="1.5" fill="url(#grad2)" opacity="0.4"/>
-            <defs>
-              <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
-                <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
-              </linearGradient>
-              <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:#a78bfa;stop-opacity:1" />
-                <stop offset="100%" style="stop-color:#6d28d9;stop-opacity:1" />
-              </linearGradient>
-            </defs>
-          </svg>
-        </div>
+      <div class="flex items-center justify-between gap-3">
         <div class="flex flex-col gap-0.5 min-w-0">
-          <div class="text-sm font-bold text-gray-900 dark:text-white tracking-tight">Audit Librarian</div>
-          <div class="text-[11px] font-medium text-gray-500 dark:text-gray-400 tracking-wide">Code Intelligence</div>
+          <div class="text-sm font-bold text-gray-900 dark:text-white tracking-tight font-sans">Audit Librarian</div>
+          <div class="text-[11px] font-medium text-gray-500 dark:text-gray-400 tracking-wide font-sans">Code Intelligence</div>
         </div>
+        
+        <!-- Sleek Collapse Button -->
+        <button 
+          @click="toggleSidebar"
+          class="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-md cursor-pointer transition-colors shrink-0"
+          title="Collapse Sidebar"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 18l-6-6 6-6"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -90,10 +83,14 @@
 
 <script setup>
 import { useRoute } from 'vue-router'
+import { useSidebar } from '../composables/useSidebar'
+
 const route = useRoute()
 const isActive = (path) => route.path === path
 
 const getRoute = (path) => {
   return { path, query: route.query.run_id ? { run_id: route.query.run_id } : {} }
 }
+
+const { toggleSidebar } = useSidebar()
 </script>
