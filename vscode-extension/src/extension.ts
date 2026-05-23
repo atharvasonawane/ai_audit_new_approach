@@ -15,8 +15,8 @@ export function activate(context: vscode.ExtensionContext) {
         // Absolute path to the project root — normalized so backslashes are single on Windows
         const rootPath = path.normalize("C:\\Users\\Atharvaso\\Desktop\\final_approach_main");
 
-        const workspacePath = workspaceFolders && workspaceFolders.length > 0 
-            ? workspaceFolders[0].uri.fsPath 
+        const workspacePath = workspaceFolders && workspaceFolders.length > 0
+            ? workspaceFolders[0].uri.fsPath
             : rootPath;  // fall back to project root when no folder is open
         const apiServerPath = path.join(rootPath, 'report', 'api_server.py');
         const venvPythonPath = path.join(rootPath, 'audit_tool', 'venv', 'Scripts', 'python.exe');
@@ -41,7 +41,8 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.ViewColumn.Two,
             {
                 enableScripts: true,
-                localResourceRoots: [vscode.Uri.file(path.join(rootPath, 'report', 'frontend', 'dist'))]
+                localResourceRoots: [vscode.Uri.file(path.join(rootPath, 'report', 'frontend', 'dist'))],
+                retainContextWhenHidden: true
             }
         );
 
@@ -237,7 +238,7 @@ function resolveFileUri(relativePath: string): vscode.Uri | undefined {
 
     // Pre-split into segments for prefix-stripping strategies
     const segments = normalizedRelative.split(path.sep).filter(s => s.length > 0);
-    const baseName  = path.basename(normalizedRelative);
+    const baseName = path.basename(normalizedRelative);
 
     // ── Strategy A: Direct join ────────────────────────────────────────────────
     // workspaceRoot + relativePath  (e.g. C:\...\Project + app\src\...\File.vue)
@@ -268,7 +269,7 @@ function resolveFileUri(relativePath: string): vscode.Uri | undefined {
     const immediateSubdirs = collectSubdirectories(workspaceRoot);
     for (const subdir of immediateSubdirs) {
         const subdirRoot = path.join(workspaceRoot, subdir);
-        const candidate  = path.join(subdirRoot, normalizedRelative);
+        const candidate = path.join(subdirRoot, normalizedRelative);
         if (fs.existsSync(candidate)) {
             console.log(`[CAL] resolveFileUri ✓ Strategy C (subdir=${subdir}): ${candidate}`);
             return vscode.Uri.file(candidate);
@@ -282,7 +283,7 @@ function resolveFileUri(relativePath: string): vscode.Uri | undefined {
     for (const subdir of immediateSubdirs) {
         const subdirRoot = path.join(workspaceRoot, subdir);
         for (let strip = 1; strip < segments.length; strip++) {
-            const stripped  = segments.slice(strip).join(path.sep);
+            const stripped = segments.slice(strip).join(path.sep);
             const candidate = path.join(subdirRoot, stripped);
             if (fs.existsSync(candidate)) {
                 console.log(`[CAL] resolveFileUri ✓ Strategy D (subdir=${subdir}, strip=${strip}): ${candidate}`);

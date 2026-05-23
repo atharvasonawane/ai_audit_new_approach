@@ -19,6 +19,11 @@ import yaml
 import logging
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+import threading
+
+# Active scan tracking process and thread safety lock
+active_scan_process = None
+active_scan_lock = threading.Lock()
 
 # Configure logging
 logging.basicConfig(
@@ -178,6 +183,21 @@ def _db_connect_rw() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
+
+
+def _cleanup_in_progress_runs():
+    """Helper to delete any audit runs that are marked 'in_progress' and clean up cascading tables."""
+    try:
+        conn = _db_connect_rw()
+        in_progress_runs = conn.execute("SELECT id FROM audit_runs WHERE status = 'in_progress'").fetchall()
+        for run in in_progress_runs:
+            run_id = run["id"]
+            logger.info(f"Cleaning up incomplete in_progress run ID: {run_id}")
+            conn.execute("DELETE FROM audit_runs WHERE id = ?", (run_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Failed to clean up in-progress runs: {e}")
 
 
 def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
@@ -1001,6 +1021,120 @@ def get_dependency_summary():
         return jsonify({"error": str(e)}), 500
 
 
+def _is_vue_project(path: Path) -> bool:
+    """Helper to check if a directory looks like a Vue/Node project."""
+    return (path / "package.json").exists() or (path / "src").exists() or (path / "vite.config.js").exists()
+
+
+def _resolve_project_path(input_path: str) -> str:
+    """
+    Smart-resolves a directory path if it is relative or selected via web browser folder picker.
+    Examines known base directories (Desktop, Users, Home) up to 2 levels deep to find matches,
+    and handles double-nested structures (e.g. StudentManagement/StudentManagement) automatically.
+    """
+    if not input_path:
+        return input_path
+        
+    norm_path = input_path.replace("\\", "/")
+    
+    # 1. If it's absolute or exists directly, return it
+    try:
+        p = Path(norm_path)
+        if p.exists() and p.is_dir():
+            # Check for double nested folder matching same name with Vue structure
+            nested = p / p.name
+            if nested.exists() and nested.is_dir() and _is_vue_project(nested):
+                return str(nested.resolve())
+            return str(p.resolve())
+    except Exception:
+        pass
+        
+    # 2. Try relative to known base directories
+    base_dirs = []
+    if PROJECT_ROOT:
+        base_dirs.append(PROJECT_ROOT.parent)  # e.g. Desktop
+        base_dirs.append(PROJECT_ROOT.parent.parent)  # e.g. Users/Atharvaso
+    try:
+        base_dirs.append(Path.home())
+        base_dirs.append(Path.home() / "Desktop")
+    except Exception:
+        pass
+        
+    seen = set()
+    unique_base_dirs = []
+    for d in base_dirs:
+        try:
+            d_resolved = d.resolve()
+            if d_resolved.exists() and d_resolved.is_dir() and d_resolved not in seen:
+                seen.add(d_resolved)
+                unique_base_dirs.append(d_resolved)
+        except Exception:
+            continue
+            
+    norm_path_parts = [part for part in norm_path.split("/") if part]
+    if not norm_path_parts:
+        return input_path
+        
+    target_leaf = norm_path_parts[-1]
+    
+    # Prioritize exact path joins on candidates
+    for base in unique_base_dirs:
+        candidate = base / norm_path
+        if candidate.exists() and candidate.is_dir():
+            nested = candidate / candidate.name
+            if nested.exists() and nested.is_dir() and _is_vue_project(nested):
+                return str(nested.resolve())
+            return str(candidate.resolve())
+            
+    # Fallback to searching subdirectories up to 2 levels deep
+    for base in unique_base_dirs:
+        try:
+            for child in base.iterdir():
+                if child.is_dir():
+                    # Skip system/hidden folders
+                    if child.name.startswith('.'):
+                        continue
+                    
+                    # Direct check child/input_path
+                    candidate = child / norm_path
+                    if candidate.exists() and candidate.is_dir():
+                        nested = candidate / candidate.name
+                        if nested.exists() and nested.is_dir() and _is_vue_project(nested):
+                            return str(nested.resolve())
+                        return str(candidate.resolve())
+                        
+                    # Check child name match
+                    if child.name.lower() == target_leaf.lower():
+                        nested = child / child.name
+                        if nested.exists() and nested.is_dir() and _is_vue_project(nested):
+                            return str(nested.resolve())
+                        return str(child.resolve())
+                        
+                    # Grandchild check
+                    try:
+                        for grandchild in child.iterdir():
+                            if grandchild.is_dir():
+                                if grandchild.name.startswith('.'):
+                                    continue
+                                candidate = grandchild / norm_path
+                                if candidate.exists() and candidate.is_dir():
+                                    nested = candidate / candidate.name
+                                    if nested.exists() and nested.is_dir() and _is_vue_project(nested):
+                                        return str(nested.resolve())
+                                    return str(candidate.resolve())
+                                if grandchild.name.lower() == target_leaf.lower():
+                                    nested = grandchild / grandchild.name
+                                    if nested.exists() and nested.is_dir() and _is_vue_project(nested):
+                                        return str(nested.resolve())
+                                    return str(grandchild.resolve())
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+            
+    return input_path
+
+
 @app.route("/api/scan", methods=["POST"])
 def scan_project():
     """
@@ -1008,6 +1142,7 @@ def scan_project():
     Executes the main analysis pipeline (run_audit.py) on the given path.
     Body: { "path": "/absolute/path/to/project" }
     """
+    global active_scan_process
     try:
         data = request.json
         if not data or "path" not in data:
@@ -1017,16 +1152,20 @@ def scan_project():
         project_path = data["path"]
         logger.info(f"Received scan request for path: {project_path}")
         
-        if not os.path.exists(project_path):
-            logger.error(f"Provided path does not exist: {project_path}")
-            return jsonify({"error": f"Path does not exist: {project_path}"}), 400
+        # Smart path resolution for web browsers selecting relative folders
+        resolved_path = _resolve_project_path(project_path)
+        logger.info(f"Smart resolved path '{project_path}' to: '{resolved_path}'")
+        
+        if not os.path.exists(resolved_path):
+            logger.error(f"Resolved path does not exist: {resolved_path}")
+            return jsonify({"error": f"Path does not exist: {resolved_path}"}), 400
 
         # Update project_config.yaml
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
             
-        config["base_path"] = project_path
-        config["project_name"] = os.path.basename(os.path.normpath(project_path))
+        config["base_path"] = resolved_path
+        config["project_name"] = os.path.basename(os.path.normpath(resolved_path))
         
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             yaml.dump(config, f, sort_keys=False)
@@ -1040,23 +1179,78 @@ def scan_project():
         
         logger.info(f"Executing pipeline: {exe} {run_audit_script} --no-report")
         
-        # Run subprocess (blocking) with capture_output to catch stderr
-        result = subprocess.run(
-            [exe, str(run_audit_script), "--no-report"],
-            capture_output=True,
-            text=True,
-            cwd=str(PROJECT_ROOT)
-        )
-        
-        if result.returncode == 0:
-            logger.info("Pipeline execution completed successfully.")
-            return jsonify({"status": "success", "message": "Analysis complete"})
-        else:
-            logger.error(f"Pipeline execution failed with return code {result.returncode}. Stderr: {result.stderr}")
-            return jsonify({"error": "Analysis failed", "details": result.stderr}), 500
+        with active_scan_lock:
+            # Check if another process is active
+            if active_scan_process is not None and active_scan_process.poll() is None:
+                return jsonify({"error": "Another scan is already in progress"}), 400
+                
+            # Spawn process using subprocess.Popen, redirecting stderr to stdout to stream all messages
+            active_scan_process = subprocess.Popen(
+                [exe, str(run_audit_script), "--no-report"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=str(PROJECT_ROOT),
+                bufsize=1
+            )
+
+        def generate_logs():
+            global active_scan_process
+            try:
+                # Read stdout line by line in real-time
+                for line in iter(active_scan_process.stdout.readline, ''):
+                    yield line
+                
+                active_scan_process.stdout.close()
+                returncode = active_scan_process.wait()
+                
+                if returncode == 0:
+                    logger.info("Pipeline execution completed successfully.")
+                    yield "\n[API_SERVER] Analysis complete!\n"
+                elif returncode in [-9, 9, 15, -15]:
+                    logger.info("Pipeline execution was cancelled by the user.")
+                    yield "\n[API_SERVER] Scan cancelled by the user.\n"
+                else:
+                    logger.error(f"Pipeline execution finished with exit code {returncode}")
+                    yield f"\n[API_SERVER] Analysis failed with exit code {returncode}.\n"
+            except Exception as e:
+                logger.error(f"Error in scan streaming: {e}")
+                yield f"\n[API_SERVER] Error: {str(e)}\n"
+            finally:
+                with active_scan_lock:
+                    active_scan_process = None
+
+        return app.response_class(generate_logs(), mimetype="text/plain")
             
     except Exception as e:
         logger.exception("An unexpected error occurred during scan execution.")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scan/cancel", methods=["POST"])
+def cancel_scan():
+    """
+    POST /api/scan/cancel
+    Cancels the active scan subprocess and purges any temporary 'in_progress' database rows.
+    """
+    global active_scan_process
+    try:
+        with active_scan_lock:
+            if active_scan_process is not None and active_scan_process.poll() is None:
+                logger.info("Cancelling active scan subprocess...")
+                active_scan_process.kill()  # Force kill the process
+                active_scan_process = None
+                
+                # Perform DB purge of in_progress runs
+                _cleanup_in_progress_runs()
+                
+                return jsonify({"status": "cancelled", "message": "Scan cancelled successfully and partial database results deleted."}), 200
+            else:
+                # Defensively clear out any stranded runs with status 'in_progress'
+                _cleanup_in_progress_runs()
+                return jsonify({"status": "idle", "message": "No active scan was running, but database was verified and cleared."}), 200
+    except Exception as e:
+        logger.exception("Error during scan cancellation:")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1207,6 +1401,9 @@ def health_check():
 
 
 if __name__ == "__main__":
+    # Defensively clear out any incomplete in_progress runs from previous crashes on startup
+    _cleanup_in_progress_runs()
+
     parser = argparse.ArgumentParser(description="Code Audit Librarian API Server")
     parser.add_argument("--port", type=int, default=5000, help="Port to run the API server on")
     args = parser.parse_args()

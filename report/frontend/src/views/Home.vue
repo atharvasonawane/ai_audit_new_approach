@@ -98,61 +98,216 @@
         </div>
 
         <div class="flex flex-col gap-4 p-6">
-          <label class="text-[11px] font-bold tracking-[0.05em] uppercase text-gray-600 dark:text-gray-400">Project Directory Path</label>
-          <div class="relative">
-            <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-            </svg>
-            <input
-              v-model="projectPath"
-              type="text"
-              placeholder="/path/to/your/vue-project"
-              class="w-full py-2.5 pr-3.5 pl-9 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700/50 text-gray-900 dark:text-gray-100 rounded-lg text-[13px] font-mono outline-none transition-all duration-200 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-400/40 focus:bg-blue-500/10 focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 caret-gray-900 dark:caret-white disabled:opacity-50 disabled:cursor-not-allowed"
-              :disabled="isAnalyzing"
-              @keydown.enter="analyzeNow"
-            />
+          <!-- Active Scan Progress Card -->
+          <div v-if="showCockpit" class="p-5 bg-blue-50/30 dark:bg-blue-950/10 border border-blue-100 dark:border-blue-900/50 rounded-xl flex flex-col gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
+            <!-- Header status details -->
+            <div class="flex items-center gap-3">
+              <!-- Animated pulsing radar / Completed icon -->
+              <div v-if="isAnalyzing" class="relative w-8 h-8 rounded-full flex items-center justify-center bg-blue-500/10 dark:bg-blue-500/20 text-blue-500 shrink-0">
+                <span class="absolute inline-flex h-full w-full rounded-full bg-blue-500/30 opacity-75 animate-ping"></span>
+                <svg class="animate-spin text-current" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
+              </div>
+              <div v-else class="w-8 h-8 rounded-full flex items-center justify-center text-emerald-500 bg-emerald-500/10 dark:bg-emerald-500/20 shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-[13px] font-bold text-gray-900 dark:text-gray-100 m-0">{{ isAnalyzing ? 'Code Analysis in Progress...' : 'Analysis Finished' }}</p>
+                <p class="text-[11px] text-gray-500 dark:text-gray-400 m-0 mt-0.5 font-normal truncate" :title="scanProgressText">{{ scanProgressText }}</p>
+              </div>
+              <span class="font-mono text-[12px] font-black text-blue-600 dark:text-blue-400 shrink-0">{{ scanProgress }}%</span>
+            </div>
+
+            <!-- Computed Progress Bar -->
+            <div class="w-full bg-gray-200 dark:bg-gray-800 rounded-full h-2 overflow-hidden shrink-0">
+              <div 
+                class="bg-gradient-to-r from-blue-500 to-indigo-500 h-full rounded-full transition-all duration-300 ease-out shadow-[0_0_8px_rgba(59,130,246,0.5)]"
+                :style="{ width: scanProgress + '%' }"
+              ></div>
+            </div>
+
+            <!-- Pipeline Step Tracker (Stepper) -->
+            <div class="flex flex-col gap-3 py-1 shrink-0">
+              <div 
+                v-for="step in scanSteps" 
+                :key="step.id"
+                class="flex gap-4 p-3 bg-white dark:bg-gray-800/10 border border-gray-100 dark:border-gray-800/30 rounded-xl transition-all duration-300"
+                :class="{
+                  'border-blue-500/20 bg-blue-500/5 dark:bg-blue-500/5': step.status === 'active',
+                  'opacity-50': step.status === 'pending'
+                }"
+              >
+                <!-- Status Icon Indicator -->
+                <div class="shrink-0 mt-0.5">
+                  <!-- Pending State -->
+                  <div v-if="step.status === 'pending'" class="w-5 h-5 rounded-full border border-gray-300 dark:border-gray-700 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+                    <div class="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-700"></div>
+                  </div>
+                  <!-- Active/In-Progress State -->
+                  <div v-else-if="step.status === 'active'" class="w-5 h-5 rounded-full flex items-center justify-center bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400">
+                    <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                    </svg>
+                  </div>
+                  <!-- Completed State -->
+                  <div v-else-if="step.status === 'completed'" class="w-5 h-5 rounded-full flex items-center justify-center bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </div>
+                  <!-- Failed State -->
+                  <div v-else-if="step.status === 'failed'" class="w-5 h-5 rounded-full flex items-center justify-center bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 animate-bounce">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </div>
+                </div>
+
+                <!-- Text & Context -->
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[13px] font-bold text-gray-900 dark:text-gray-100">{{ step.name }}</span>
+                    <span v-if="step.time" class="font-mono text-[10px] font-bold py-0.5 px-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700/50 rounded-md text-gray-500 dark:text-gray-400 shrink-0">
+                      {{ step.time }}
+                    </span>
+                  </div>
+                  <p class="text-[11px] text-gray-500 dark:text-gray-400 m-0 mt-0.5 font-normal leading-normal">{{ step.desc }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Collapsible Scrolling Monospace Terminal UI -->
+            <div class="flex flex-col gap-2 min-h-0 border-t border-gray-100 dark:border-gray-800/80 pt-3">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] font-bold uppercase tracking-[0.05em] text-gray-400 dark:text-gray-500">Developer Logs Console</span>
+                <button 
+                  class="text-[10px] font-bold text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 cursor-pointer bg-none border-none p-0 outline-none flex items-center gap-1"
+                  @click="showLogs = !showLogs"
+                >
+                  <span>{{ showLogs ? 'Hide Logs' : 'Show Logs' }}</span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="transition-transform duration-200" :class="{ 'rotate-180': showLogs }">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              </div>
+              
+              <div 
+                v-show="showLogs"
+                ref="terminalContainer"
+                class="bg-gray-950 dark:bg-black border border-gray-900 dark:border-gray-950 rounded-lg p-3 h-[130px] overflow-y-auto font-mono text-[10px] leading-[1.6] text-gray-300 dark:text-gray-400 shadow-inner flex flex-col gap-1 auto-scroll select-text scrollbar-thin scrollbar-thumb-gray-800 scrollbar-track-transparent"
+              >
+                <div v-if="scanLogs.length === 0" class="text-gray-500 italic">Initializing console log stream...</div>
+                <div 
+                  v-for="(log, idx) in scanLogs" 
+                  :key="idx"
+                  class="whitespace-pre-wrap break-all"
+                  :class="{
+                    'text-emerald-400 dark:text-emerald-500 font-bold': log.includes('complete') || log.includes('Complete'),
+                    'text-amber-400 dark:text-amber-500 font-bold': log.includes('WARNING') || log.includes('dirty') || log.includes('unresolved'),
+                    'text-red-400 dark:text-red-500 font-bold': log.includes('failed') || log.includes('Error') || log.includes('Error:') || log.includes('ABORTED') || log.includes('❌'),
+                    'text-blue-400 dark:text-blue-500': log.includes('Starting') || log.includes('Running') || log.includes('Phase')
+                  }"
+                >
+                  {{ log }}
+                </div>
+              </div>
+            </div>
+            
+            <button
+              v-if="isAnalyzing"
+              class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-red-500/10 hover:bg-red-500/20 dark:bg-red-500/5 dark:hover:bg-red-500/10 border border-red-500/20 dark:border-red-500/30 text-red-600 dark:text-red-400 w-full rounded-lg text-[12px] font-bold cursor-pointer transition-all duration-200 shrink-0 mt-1"
+              @click="cancelScan"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+              </svg>
+              Stop & Purge Scan
+            </button>
+
+            <button
+              v-else
+              class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700/80 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 w-full rounded-lg text-[12px] font-bold cursor-pointer transition-all duration-200 shrink-0 mt-1"
+              @click="showCockpit = false"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+              Return to Quick Start
+            </button>
           </div>
 
-          <div v-if="pathError" class="flex items-center gap-2 py-2.5 px-3 bg-red-500/10 border border-red-500/20 rounded-lg text-[12px] text-red-600 dark:text-red-400">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-            {{ pathError }}
-          </div>
-
-          <div class="flex gap-3">
-            <!-- Hidden folder input -->
-            <input
-              ref="folderInput"
-              type="file"
-              webkitdirectory
-              directory
-              class="hidden"
-              @change="handleFolderSelect"
-            />
-            <button class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 hover:bg-gray-200 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-100" @click="handleBrowse">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <!-- Quick Start Form Controls -->
+          <template v-if="!showCockpit">
+            <label class="text-[11px] font-bold tracking-[0.05em] uppercase text-gray-600 dark:text-gray-400">Project Directory Path</label>
+            <div class="relative">
+              <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
               </svg>
-              Browse
-            </button>
-            <button
-              class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white flex-1 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 shadow-[0_4px_12px_rgba(59,130,246,0.2)] hover:-translate-y-[1px] hover:shadow-[0_6px_20px_rgba(59,130,246,0.3)] disabled:bg-slate-500/20 disabled:bg-none disabled:text-slate-500 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
-              :disabled="!projectPath || isAnalyzing"
-              @click="analyzeNow"
-            >
-              <svg v-if="isAnalyzing" class="animate-spin -ml-1 mr-2 h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <input
+                v-model="projectPath"
+                type="text"
+                placeholder="/path/to/your/vue-project"
+                class="w-full py-2.5 pr-3.5 pl-9 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700/50 text-gray-900 dark:text-gray-100 rounded-lg text-[13px] font-mono outline-none transition-all duration-200 placeholder-gray-400 dark:placeholder-gray-500 focus:border-blue-400/40 focus:bg-blue-500/10 focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 caret-gray-900 dark:caret-white disabled:opacity-50 disabled:cursor-not-allowed"
+                :disabled="isAnalyzing"
+                @keydown.enter="analyzeNow"
+              />
+            </div>
+
+            <div v-if="projectPath && !projectPath.includes('/') && !projectPath.includes('\\')" class="text-[11px] text-blue-600 dark:text-blue-400 bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/10 dark:border-blue-500/20 py-2 px-3 rounded-lg leading-normal flex items-start gap-1.5 mt-0.5">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 mt-0.5 opacity-75">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
               </svg>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="5 3 19 12 5 21 5 3"/>
+              <span>Browser security hides absolute paths. Our smart backend resolver will resolve relative folder "{{ projectPath }}" to its absolute directory automatically, or you can paste the absolute path.</span>
+            </div>
+
+            <div v-if="pathError" class="flex items-center gap-2 py-2.5 px-3 bg-red-500/10 border border-red-500/20 rounded-lg text-[12px] text-red-600 dark:text-red-400">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
               </svg>
-              {{ isAnalyzing ? 'Analyzing... Please wait' : 'Analyze Now' }}
-            </button>
-          </div>
+              {{ pathError }}
+            </div>
+
+            <div class="flex gap-3">
+              <!-- Hidden folder input -->
+              <input
+                ref="folderInput"
+                type="file"
+                webkitdirectory
+                directory
+                class="hidden"
+                @change="handleFolderSelect"
+              />
+              <button class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 hover:bg-gray-200 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-100" @click="handleBrowse">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+                Browse
+              </button>
+              <button
+                class="inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white flex-1 rounded-lg text-[13px] font-bold cursor-pointer transition-all duration-200 shadow-[0_4px_12px_rgba(59,130,246,0.2)] hover:-translate-y-[1px] hover:shadow-[0_6px_20px_rgba(59,130,246,0.3)] disabled:bg-slate-500/20 disabled:bg-none disabled:text-slate-500 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
+                :disabled="!projectPath || isAnalyzing"
+                @click="analyzeNow"
+              >
+                <svg v-if="isAnalyzing" class="animate-spin -ml-1 mr-2 h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                {{ isAnalyzing ? 'Analyzing... Please wait' : 'Analyze Now' }}
+              </button>
+            </div>
+          </template>
 
           <div v-if="scanSuccess" class="flex items-center gap-2 py-2.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[12px] text-emerald-600 dark:text-emerald-400">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -263,7 +418,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { filesAPI } from '../api.js'
 import { getVsCodeApi } from '../utils/vscode.js'
@@ -278,8 +433,25 @@ const pathError = ref('')
 const folderInput = ref(null)
 
 const isAnalyzing = ref(false)
+const showCockpit = ref(false)
 const scanSuccess = ref('')
 const scanError = ref('')
+
+// Live Scan logs & computed progress refs
+const scanLogs = ref([])
+const scanProgress = ref(0)
+const scanProgressText = ref('Initializing scan...')
+const terminalContainer = ref(null)
+const showLogs = ref(false) // Collapsed by default for a clean end-user UI
+const activeFile = ref('')
+const hasInjectedErrorSummary = ref(false)
+
+// Visual Pipeline Stepper steps definition
+const scanSteps = ref([
+  { id: 'scout', name: 'Deterministic Scout Scan', desc: 'Audits file structures, ESLint flags, and cyclomatic complexity.', status: 'pending', time: '' },
+  { id: 'graph', name: 'Component Dependency Graph', desc: 'Extracts component relationships, cycle detections, and maps imports.', status: 'pending', time: '' },
+  { id: 'ai', name: 'AI Code Intelligence', desc: 'Synthesizes LLM-driven deep audits and generates summaries.', status: 'pending', time: '' }
+])
 
 // Delete Audit states
 const showDeleteModal = ref(false)
@@ -372,6 +544,44 @@ const navigateToDashboard = (runId) => {
     router.push('/dashboard')
   }
 }
+const isRelevantLog = (line) => {
+  const lower = line.toLowerCase()
+  
+  // 1. Always keep warnings, errors, exceptions, and failures
+  if (lower.includes('error') || lower.includes('failed') || lower.includes('warning') || lower.includes('exception')) {
+    return true
+  }
+  
+  // 2. Filter out repetitive file-by-file scout logs (since the progress bar covers this visually!)
+  if (line.includes('[orchestrator]') && line.includes('Processing')) {
+    return false
+  }
+  
+  // 3. Keep phase checkmarks, complete indicators, and database summaries
+  if (
+    lower.includes('phase') || 
+    lower.includes('complete') || 
+    lower.includes('starting') || 
+    lower.includes('running') || 
+    lower.includes('synthesis') ||
+    lower.includes('database') ||
+    lower.includes('wrote') ||
+    lower.includes('saved to') ||
+    lower.includes('cancelled') ||
+    lower.includes('api_server') ||
+    lower.includes('flask')
+  ) {
+    return true
+  }
+  
+  // 4. Filter out any remaining orchestrator numeric progress patterns
+  if (line.match(/\[orchestrator\]\s+\[(\d+)\/(\d+)\]/)) {
+    return false
+  }
+  
+  return true
+}
+
 const analyzeNow = async () => {
   console.log('[Home.vue] analyzeNow triggered with path:', projectPath.value)
   
@@ -383,7 +593,25 @@ const analyzeNow = async () => {
   pathError.value = ''
   scanSuccess.value = ''
   scanError.value = ''
+  scanLogs.value = []
+  scanProgress.value = 0
+  scanProgressText.value = 'Initializing scan...'
   isAnalyzing.value = true
+  showCockpit.value = true
+  activeFile.value = ''
+  hasInjectedErrorSummary.value = false
+
+  // Reset visual pipeline stepper
+  scanSteps.value.forEach(s => {
+    s.status = 'pending'
+    s.time = ''
+  })
+  scanSteps.value[0].status = 'active'
+  showLogs.value = false // Collapsed by default for a clean end-user experience
+
+  let scoutStartTime = Date.now()
+  let graphStartTime = null
+  let aiStartTime = null
   
   try {
     const port = window.__FLASK_PORT__ || 5000
@@ -393,17 +621,161 @@ const analyzeNow = async () => {
       body: JSON.stringify({ path: projectPath.value })
     })
     
-    const data = await res.json()
     if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
       throw new Error(data.error || data.details || 'Analysis failed')
     }
     
-    scanSuccess.value = data.message || 'Analysis complete! The dashboard will now reflect the latest data.'
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      // Save last partial line back to buffer
+      buffer = lines.pop()
+      
+      for (const line of lines) {
+        if (!line.trim()) continue
+        
+        // Track the active file currently being audited
+        const fileMatch = line.match(/Processing\s+(.*)/)
+        if (fileMatch) {
+          activeFile.value = fileMatch[1].replace(/\.+$/, '').trim()
+        }
+        
+        // Filter and add only relevant log lines for a clean interface
+        if (isRelevantLog(line)) {
+          scanLogs.value.push(line)
+        }
+        
+        // Auto scroll terminal container
+        nextTick(() => {
+          if (terminalContainer.value) {
+            terminalContainer.value.scrollTop = terminalContainer.value.scrollHeight
+          }
+        })
+        
+        // Parse step transitions & durations dynamically
+        if (line.includes('Scout Phase Complete')) {
+          const elapsed = ((Date.now() - scoutStartTime) / 1000).toFixed(1)
+          scanSteps.value[0].status = 'completed'
+          scanSteps.value[0].time = `${elapsed}s`
+          
+          scanSteps.value[1].status = 'active'
+          graphStartTime = Date.now()
+        } else if (line.includes('Dependency Graph Phase Complete')) {
+          const elapsed = ((Date.now() - graphStartTime) / 1000).toFixed(1)
+          scanSteps.value[1].status = 'completed'
+          scanSteps.value[1].time = `${elapsed}s`
+          
+          scanSteps.value[2].status = 'active'
+          aiStartTime = Date.now()
+        } else if (line.includes('Analysis complete!')) {
+          const elapsed = ((Date.now() - aiStartTime) / 1000).toFixed(1)
+          scanSteps.value[2].status = 'completed'
+          scanSteps.value[2].time = `${elapsed}s`
+          
+          scanProgress.value = 100
+          scanProgressText.value = 'Analysis completed successfully!'
+          scanSuccess.value = 'Analysis complete! The dashboard will now reflect the latest data.'
+        } else if (line.includes('Scan cancelled by the user.')) {
+          scanProgress.value = 0
+          scanProgressText.value = 'Scan cancelled.'
+          scanSuccess.value = 'Scan cancelled successfully and partial database results purged.'
+          scanSteps.value.forEach(s => {
+            if (s.status === 'active') s.status = 'pending'
+          })
+        }
+        
+        // Parse progress patterns
+        const match = line.match(/\[orchestrator\]\s+\[(\d+)\/(\d+)\]/)
+        if (match) {
+          const current = parseInt(match[1], 10)
+          const total = parseInt(match[2], 10)
+          scanProgress.value = Math.round((current / total) * 80) // 80% weight for file scouting
+          scanProgressText.value = `Auditing files (${current}/${total})...`
+        } else if (line.includes('targeted ESLint scan') && scanProgress.value < 85) {
+          scanProgress.value = 85
+          scanProgressText.value = 'Running targeted ESLint compliance check...'
+        } else if (line.includes('Dependency Graph') && scanProgress.value < 90) {
+          scanProgress.value = 90
+          scanProgressText.value = 'Building visual component dependency graph...'
+        } else if ((line.includes('Starting AI Agent Phase') || line.includes('AI Agent')) && scanProgress.value < 95) {
+          scanProgress.value = 95
+          scanProgressText.value = 'Synthesizing AI analysis and generating summaries...'
+        }
+        
+        // Parse critical errors & trigger auto-expand for developer debugging
+        if (line.includes('failed') || line.includes('Error:') || line.includes('Analysis failed')) {
+          const activeStep = scanSteps.value.find(s => s.status === 'active')
+          if (activeStep) {
+            activeStep.status = 'failed'
+          }
+          
+          // Inject explicit diagnosis about unscanned files if we have an active file
+          if (activeFile.value && !hasInjectedErrorSummary.value) {
+            scanLogs.value.push(`[SYSTEM WARNING] ❌ PIPELINE ABORTED: Analysis failed while auditing: ${activeFile.value}`)
+            scanLogs.value.push(`[SYSTEM WARNING] ⚠️ Remaining files in the queue were skipped and not scanned.`)
+            hasInjectedErrorSummary.value = true
+          }
+          
+          showLogs.value = true // Auto-expand logs drawer so the developer can see the error!
+          nextTick(() => {
+            if (terminalContainer.value) {
+              terminalContainer.value.scrollTop = terminalContainer.value.scrollHeight
+            }
+          })
+        }
+      }
+    }
+    
     await fetchRecentAudits()
   } catch (err) {
     scanError.value = err.message || 'An unexpected error occurred during analysis.'
+    const activeStep = scanSteps.value.find(s => s.status === 'active')
+    if (activeStep) {
+      activeStep.status = 'failed'
+    }
+    if (activeFile.value && !hasInjectedErrorSummary.value) {
+      scanLogs.value.push(`[SYSTEM WARNING] ❌ PIPELINE ABORTED: Analysis failed while auditing: ${activeFile.value}`)
+      scanLogs.value.push(`[SYSTEM WARNING] ⚠️ Remaining files in the queue were skipped and not scanned.`)
+      hasInjectedErrorSummary.value = true
+    }
+    showLogs.value = true // Reveal logs
   } finally {
     isAnalyzing.value = false
+  }
+}
+
+const cancelScan = async () => {
+  console.log('[Home.vue] cancelScan triggered')
+  try {
+    const port = window.__FLASK_PORT__ || 5000
+    const res = await fetch(`http://localhost:${port}/api/scan/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    const data = await res.json()
+    console.log('[Home.vue] cancelScan response:', data)
+    
+    scanSuccess.value = 'Scan stopped and intermediate results deleted successfully.'
+    isAnalyzing.value = false
+    showCockpit.value = false
+    scanLogs.value = []
+    scanProgress.value = 0
+    scanSteps.value.forEach(s => {
+      s.status = 'pending'
+      s.time = ''
+    })
+    await fetchRecentAudits()
+  } catch (err) {
+    console.error('Error cancelling scan:', err)
+    scanError.value = 'Failed to abort the active scan.'
   }
 }
 
