@@ -170,15 +170,25 @@ WCAG_METADATA = {
 
 
 def _db_connect() -> sqlite3.Connection:
-    """Create a read-only database connection with Row factory."""
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    """Create a database connection for reading, with WAL checkpoint to ensure
+    the main .db file reflects all recent writes before any query runs.
+
+    The old mode=ro URI connection bypassed WAL on some platforms, causing
+    web-based SQLite viewers (which read the raw .db file) to see stale data.
+    """
+    conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    # Flush WAL → main .db file so the on-disk file (and its mtime) is current.
+    # This means any SQLite viewer that opens the .db file directly will see fresh data.
+    conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+    conn.execute("PRAGMA query_only=ON;")  # Safety: prevent accidental writes
     return conn
 
 
 def _db_connect_rw() -> sqlite3.Connection:
     """Create a read-write database connection with pragmas enabled."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
@@ -984,18 +994,142 @@ def get_run_status():
         return jsonify({"error": str(e)}), 500
 
 
+def _get_dynamic_graph_data(conn: sqlite3.Connection, run_id: int) -> Optional[dict]:
+    """Helper to reconstruct the dependency graph data dynamically from the database."""
+    # Check if there are dependency metrics for this run_id
+    count = conn.execute(
+        "SELECT COUNT(*) as count FROM dependency_metrics WHERE run_id = ?", (run_id,)
+    ).fetchone()["count"]
+    
+    if count == 0:
+        return None
+        
+    rows = conn.execute(
+        "SELECT * FROM dependency_metrics WHERE run_id = ?", (run_id,)
+    ).fetchall()
+    
+    nodes = []
+    orphans = []
+    cycles = []
+    seen_cycles = set()
+    most_critical = None
+    most_critical_in = 0
+    max_impact_score = -1.0
+    max_depth = 0
+    
+    for row in rows:
+        file_path = row["file_path"]
+        category = row["node_category"]
+        in_deg = row["in_degree"]
+        out_deg = row["out_degree"]
+        depth = row["depth"]
+        impact = row["impact_score"]
+        is_cycle = bool(row["is_in_cycle"])
+        
+        nodes.append({
+            "id": file_path,
+            "category": category,
+            "in_degree": in_deg,
+            "out_degree": out_deg,
+            "depth": depth,
+            "impact_score": impact,
+            "is_in_cycle": is_cycle
+        })
+        
+        if category == "orphan":
+            orphans.append(file_path)
+            
+        if is_cycle and row["cycle_members"]:
+            try:
+                members = json.loads(row["cycle_members"])
+                if isinstance(members, list):
+                    c_tuple = tuple(sorted(members))
+                    if c_tuple not in seen_cycles:
+                        seen_cycles.add(c_tuple)
+                        cycles.append(members)
+            except Exception:
+                pass
+                
+        if depth > max_depth:
+            max_depth = depth
+            
+        if impact > max_impact_score:
+            max_impact_score = impact
+            most_critical = file_path
+            most_critical_in = in_deg
+            
+    edge_rows = conn.execute(
+        "SELECT parent_file, child_file, relationship_type FROM component_relationships WHERE run_id = ?",
+        (run_id,)
+    ).fetchall()
+    
+    edges = []
+    for er in edge_rows:
+        edges.append({
+            "source": er["parent_file"],
+            "target": er["child_file"],
+            "relationship_type": er["relationship_type"] or "utility"
+        })
+        
+    summary = {
+        "total_nodes": len(nodes),
+        "total_edges": len(edges),
+        "orphan_count": len(orphans),
+        "cycle_count": len(cycles),
+        "max_depth": max_depth,
+        "most_critical_file": most_critical,
+        "most_critical_file_in_degree": most_critical_in
+    }
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "summary": summary,
+        "cycles": cycles,
+        "orphans": orphans
+    }
+
+
 @app.route("/api/dependency-graph", methods=["GET"])
 def get_dependency_graph():
     """
-    GET /api/dependency-graph
-    Returns the full graph.json content.
+    GET /api/dependency-graph?run_id=X
+    Returns the dependency graph for a specific run_id from the database.
+    If run_id is explicitly provided but has no graph data (graph phase didn't run),
+    returns an empty graph — never falls back to another run's stale data.
+    If no run_id is provided at all, falls back to static graph.json (legacy mode).
     """
     try:
-        # Assuming the graph.json is written to report/frontend/public/graph.json
+        # Check if run_id was EXPLICITLY requested in the URL
+        explicit_run_id = request.args.get("run_id")
+        
+        conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+
+        if run_id is not None:
+            dynamic_data = _get_dynamic_graph_data(conn, run_id)
+            conn.close()
+            if dynamic_data:
+                return jsonify(dynamic_data)
+            elif explicit_run_id:
+                # run_id was explicitly requested but has no graph data (graph phase skipped)
+                # Return empty graph — do NOT fall back to another run's stale data
+                return jsonify({
+                    "nodes": [], "edges": [], "cycles": [], "orphans": [],
+                    "summary": {
+                        "total_nodes": 0, "total_edges": 0, "orphan_count": 0,
+                        "cycle_count": 0, "max_depth": 0,
+                        "most_critical_file": None, "most_critical_file_in_degree": 0,
+                        "message": "No dependency graph was generated for this audit run. The graph phase may have been skipped."
+                    }
+                })
+        else:
+            conn.close()
+
+        # Only fall back to static graph.json when no run_id was specified at all (legacy mode)
         graph_path = PROJECT_ROOT / "report" / "frontend" / "public" / "graph.json"
         if not graph_path.exists():
             return jsonify({"error": "graph.json not found"}), 404
-            
         with open(graph_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return jsonify(data)
@@ -1006,14 +1140,34 @@ def get_dependency_graph():
 @app.route("/api/dependency-summary", methods=["GET"])
 def get_dependency_summary():
     """
-    GET /api/dependency-summary
-    Returns only the summary block from graph.json.
+    GET /api/dependency-summary?run_id=X
+    Returns only the summary block, dynamically resolved per run_id.
+    Returns empty summary if run_id was explicitly given but has no graph data.
     """
     try:
+        explicit_run_id = request.args.get("run_id")
+
+        conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+
+        if run_id is not None:
+            dynamic_data = _get_dynamic_graph_data(conn, run_id)
+            conn.close()
+            if dynamic_data:
+                return jsonify(dynamic_data.get("summary", {}))
+            elif explicit_run_id:
+                return jsonify({
+                    "total_nodes": 0, "total_edges": 0, "orphan_count": 0,
+                    "cycle_count": 0, "max_depth": 0,
+                    "most_critical_file": None, "most_critical_file_in_degree": 0,
+                    "message": "No dependency graph was generated for this audit run."
+                })
+        else:
+            conn.close()
+
         graph_path = PROJECT_ROOT / "report" / "frontend" / "public" / "graph.json"
         if not graph_path.exists():
             return jsonify({"error": "graph.json not found"}), 404
-            
         with open(graph_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return jsonify(data.get("summary", {}))
@@ -1374,14 +1528,30 @@ def get_orphans():
 @app.route("/api/cycles", methods=["GET"])
 def get_cycles():
     """
-    GET /api/cycles
-    Returns all detected cycles from graph.json.
+    GET /api/cycles?run_id=X
+    Returns all detected cycles, dynamically resolved per run_id.
+    Returns empty list if run_id was explicitly given but has no graph data.
     """
     try:
+        explicit_run_id = request.args.get("run_id")
+
+        conn = _db_connect()
+        run_id = _get_run_id(conn, PROJECT_NAME)
+
+        if run_id is not None:
+            dynamic_data = _get_dynamic_graph_data(conn, run_id)
+            conn.close()
+            if dynamic_data:
+                return jsonify(dynamic_data.get("cycles", []))
+            elif explicit_run_id:
+                # Explicitly requested run has no graph data — return empty, not stale data
+                return jsonify([])
+        else:
+            conn.close()
+
         graph_path = PROJECT_ROOT / "report" / "frontend" / "public" / "graph.json"
         if not graph_path.exists():
             return jsonify([])
-            
         with open(graph_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return jsonify(data.get("cycles", []))

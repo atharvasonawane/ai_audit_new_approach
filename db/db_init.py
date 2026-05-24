@@ -21,6 +21,8 @@ def init_db(db_path: Optional[Path] = None) -> Path:
         _migrate_existing_schema(conn)
         _create_tables(conn)
         _create_indexes(conn)
+        # Flush WAL to main file immediately after schema creation
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
 
     return path
 

@@ -12,7 +12,23 @@ def _get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
+    # Sync WAL to main DB file after each write so all readers (browser, file viewers)
+    # see the latest data. Without this, changes only exist in the .db-wal sidecar file.
+    conn.execute("PRAGMA wal_autocheckpoint=1;")  # checkpoint after every 1 page change
     return conn
+
+
+def _checkpoint(conn: sqlite3.Connection) -> None:
+    """Force WAL checkpoint so the main .db file is updated on disk immediately.
+    
+    SQLite WAL mode buffers writes in audit_history.db-wal. Without an explicit
+    checkpoint, the main .db file timestamp never updates and non-WAL-aware readers
+    (web browsers, third-party SQLite viewers) see stale data.
+    """
+    try:
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+    except Exception:
+        pass  # Non-critical — data is safe in WAL even if checkpoint fails
 
 def _normalize_path(file_path: str, base_path: str) -> str:
     if base_path:
@@ -117,6 +133,7 @@ def create_audit_run(project_name: str, db_path: Optional[Path] = None) -> int:
             """, (new_run_id, prev_id))
             
         conn.commit()
+        _checkpoint(conn)
         return new_run_id
 
 def update_audit_run(
@@ -150,6 +167,7 @@ def update_audit_run(
     with _get_connection(db_path) as conn:
         conn.execute(f"UPDATE audit_runs SET {', '.join(fields)} WHERE id = ?", params)
         conn.commit()
+        _checkpoint(conn)
 
 def upsert_vue_file(run_id: int, data: Dict[str, Any], db_path: Optional[Path] = None) -> int:
     columns = [
@@ -195,6 +213,7 @@ def upsert_vue_file(run_id: int, data: Dict[str, Any], db_path: Optional[Path] =
     with _get_connection(db_path) as conn:
         cur = conn.execute(sql, values)
         conn.commit()
+        _checkpoint(conn)
         row_id = cur.lastrowid
 
         if not row_id:
@@ -243,6 +262,7 @@ def insert_ai_issues_bulk(run_id: int, issues: list[dict], db_path: Optional[Pat
                 )
             )
         conn.commit()
+        _checkpoint(conn)
 
 def get_all_file_hashes(
     project_name: str, run_id: Optional[int] = None, db_path: Optional[Path] = None
@@ -353,6 +373,7 @@ def write_scan_result(
                 ),
             )
         conn.commit()
+        _checkpoint(conn)
 
     return vue_file_id
 
@@ -460,6 +481,7 @@ def write_eslint_results(
             )
         
         conn.commit()
+        _checkpoint(conn)
 
     return {
         "file_flags": file_flags_written,

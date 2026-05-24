@@ -102,12 +102,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { filesAPI } from '../api.js'
 
 const route = useRoute()
 const router = useRouter()
+const currentRunId = computed(() => route.query.run_id ? Number(route.query.run_id) : null)
 const loading = ref(false)
 const error = ref(null)
 const allNodes = ref([])
@@ -197,16 +198,26 @@ const navigateToFile = (filePath) => {
   router.push({ path: '/audit', query: q })
 }
 
-onMounted(async () => {
+const loadTableData = async () => {
   loading.value = true
   error.value = null
   try {
-    const res = await filesAPI.getDependencyGraph()
+    const res = await filesAPI.getDependencyGraph(currentRunId.value)
     allNodes.value = res.data?.nodes || []
   } catch (err) {
     error.value = err.response?.data?.error || err.message || 'Failed to load data'
   } finally {
     loading.value = false
+  }
+}
+
+onMounted(async () => {
+  await loadTableData()
+})
+
+watch(currentRunId, async (newId, oldId) => {
+  if (newId !== oldId) {
+    await loadTableData()
   }
 })
 </script>

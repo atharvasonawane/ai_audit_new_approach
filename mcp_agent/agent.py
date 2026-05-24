@@ -290,6 +290,8 @@ def _complete_audit_run(db_path: Path, run_id: int) -> None:
             (now, run_id),
         )
         conn.commit()
+        # Flush WAL so .db file mtime updates and all readers see 'completed' status
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
 
 
 def _finalize_audit_run_with_synthesis(

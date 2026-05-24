@@ -245,9 +245,13 @@
 
 <script setup>
 import { ref, onMounted, watch, onBeforeUnmount, computed, shallowRef } from 'vue'
+import { useRoute } from 'vue-router'
 import * as d3 from 'd3'
 import { filesAPI } from '../api.js'
 import DependencyTable from './DependencyTable.vue'
+
+const route = useRoute()
+const currentRunId = computed(() => route.query.run_id ? Number(route.query.run_id) : null)
 
 const viewMode = ref('graph')
 
@@ -413,13 +417,32 @@ const getBasename = (path) => {
   return parts[parts.length - 1]
 }
 
-onMounted(async () => {
+const loadGraph = async () => {
   try {
-    const res = await filesAPI.getDependencyGraph()
+    const res = await filesAPI.getDependencyGraph(currentRunId.value)
     rawData = res.data
-    initGraph()
+    if (svg) {
+      // Graph already initialized — just refresh the data
+      updateGraph()
+    } else {
+      initGraph()
+    }
   } catch (err) {
     console.error("Failed to load graph data", err)
+  }
+}
+
+onMounted(async () => {
+  await loadGraph()
+})
+
+// Re-fetch graph when user selects a different audit run
+watch(currentRunId, async (newId, oldId) => {
+  if (newId !== oldId) {
+    focusedNode.value = null
+    pinnedNode = null
+    blastRadiusNode = null
+    await loadGraph()
   }
 })
 
