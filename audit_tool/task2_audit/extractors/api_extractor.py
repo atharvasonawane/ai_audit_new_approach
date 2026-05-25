@@ -1,10 +1,17 @@
 import re
-import logging
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import List, Dict, Any
 
 import yaml
+
+# Ensure PROJECT_ROOT is in sys.path so utils package is importable
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from utils.logger import logger
 
 # tree-sitter imports with pack fallback
 try:
@@ -16,8 +23,6 @@ try:
 except ImportError:
     _TS_AVAILABLE = False
     JS_LANGUAGE = None
-
-logger = logging.getLogger(__name__)
 
 # API regexes (one API call per full request-chain invocation)
 _AXIOS_CALL_RE = re.compile(
@@ -56,7 +61,7 @@ def extract_api_calls(
     raw_script_text: str,
     filepath: str,
     config_path: str,
-    script_start_line: int = 1,
+    script_start_line: int = 0,
 ) -> dict:
     """Extract API calls with one count per request chain (MQL fetch + axios methods)."""
     cfg = _load_config(config_path)
@@ -83,7 +88,7 @@ def extract_api_calls(
                 "full_match": match.group(0),
                 "in_mounted": in_mounted,
                 "in_loop": False,
-                "line_number": call_line + script_start_line - 1,
+                "line_number": call_line + script_start_line,
             }
         )
 
@@ -114,9 +119,10 @@ def extract_api_calls(
                 "full_match": fetch_match.group(0),
                 "in_mounted": in_mounted,
                 "in_loop": False,
-                "line_number": call_line + script_start_line - 1,
+                "line_number": call_line + script_start_line,
             }
         )
+
 
     total_count = len(calls)
     mounted_count = sum(1 for c in calls if c["in_mounted"])

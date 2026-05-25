@@ -10,11 +10,16 @@ Pipeline per file:
                -> template_extractor -> mql_extractor -> flag_engine
 """
 
-import logging
 import os
+import sys
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+# Ensure PROJECT_ROOT is in sys.path so utils package is importable
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from utils.logger import logger
 
 
 def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str, known_hashes: dict = None) -> dict:
@@ -160,6 +165,13 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str, known_hashe
                 "File %s has %d lines but parsed as empty", str(filepath), raw_lines
             )
 
+        # Track Separation Gating: Limit issue/quality scanning strictly to .vue files
+        if not filepath.endswith('.vue'):
+            logger.info("Non-Vue asset detected. Bypassing quality scans/issue auditing for: %s", _Path(filepath).name)
+            result = dict(empty)
+            result["extracted_metrics"]["script_lines"] = raw_lines
+            return result
+
         # Step 2: Clean
         clean = clean_script(raw_script)
 
@@ -174,7 +186,9 @@ def run_pipeline_on_file(filepath: str, cfg: dict, config_path: str, known_hashe
         template = extract_template_metrics(tmpl_node, source_bytes, raw_script)
 
         # Step 5: API
-        script_start_line = parsed.get("script_start_line") or 1
+        script_start_line = parsed.get("script_start_line")
+        if script_start_line is None:
+            script_start_line = 0
         api_data = extract_api_calls(clean, raw_script, filepath, config_path, script_start_line)
 
         # Calculate payload metrics
@@ -257,22 +271,26 @@ def scan_all_vue_files(base_path: str, cfg: dict, config_path: str, known_hashes
     results = []
     dirty_files = []
 
-    logger.info("[orchestrator] Found %d .vue files under '%s'.", total, base_path)
+    logger.info("[Scout Engine] Total identified files for static analysis: %d", total)
+    logger.info("[orchestrator] Found %d files under '%s'.", total, base_path)
     logger.info("[orchestrator] Starting incremental audit with mtime + SHA-256 two-step filter...")
 
     processed_count = 0
     skipped_count = 0
 
     for idx, filepath in enumerate(vue_files, 1):
+        logger.info("[Scout Engine] Commencing analysis trace for file: %s", filepath)
         result = run_pipeline_on_file(filepath, cfg, config_path, known_hashes)
         results.append(result)
         
         if result.get("skipped"):
             skipped_count += 1
+            logger.info("[Scout Engine] Successfully completed analysis trace (skipped) for file: %s", filepath)
         else:
             processed_count += 1
             dirty_files.append(filepath)
             logger.info("[orchestrator] [%d/%d] Processing %s", idx, total, Path(filepath).name)
+            logger.info("[Scout Engine] Successfully completed analysis trace (processed) for file: %s", filepath)
 
     logger.info("[orchestrator] Incremental scan complete:")
     logger.info("[orchestrator]   - Total files found: %d", total)

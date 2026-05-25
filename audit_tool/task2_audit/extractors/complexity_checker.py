@@ -33,10 +33,16 @@ Dependencies:
 """
 
 import re
-import logging
+import sys
+from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+# Ensure PROJECT_ROOT is in sys.path so utils package is importable
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from utils.logger import logger
 
 # ---------------------------------------------------------------------------
 # Regex fallbacks (used when tree-sitter AST walk can't find the block)

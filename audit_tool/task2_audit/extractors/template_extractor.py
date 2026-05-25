@@ -26,7 +26,15 @@ Dependencies:
 """
 
 import re
-import logging
+import sys
+from pathlib import Path
+
+# Ensure PROJECT_ROOT is in sys.path so utils package is importable
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from utils.logger import logger
 
 try:
     from tree_sitter import Parser
@@ -37,8 +45,6 @@ try:
 except ImportError:
     _JS_LANGUAGE = None
     _TS_AVAILABLE = False
-
-logger = logging.getLogger(__name__)
 
 # Tags that are native HTML, not child components
 _NATIVE_HTML_TAGS = {
@@ -580,7 +586,7 @@ def _find_matching_brace(text: str, open_brace_idx: int) -> int:
 # Self-test
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    import sys, logging
+    import logging
     from pathlib import Path
 
     logging.basicConfig(
@@ -609,7 +615,7 @@ if __name__ == "__main__":
     out.append(f"max_nesting_depth : {result['max_nesting_depth']}")
 
     for line in out:
-        print(line)
+        logger.info(line)
 
     Path(BASE / "_template_results.txt").write_text("\n".join(out), encoding="utf-8")
-    print("Saved to _template_results.txt")
+    logger.info("Saved to _template_results.txt")

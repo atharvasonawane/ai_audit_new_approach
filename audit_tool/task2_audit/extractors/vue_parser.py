@@ -26,8 +26,14 @@ Dependencies:
 """
 
 import os
+import sys
 import logging
 from pathlib import Path
+
+# Ensure PROJECT_ROOT is in sys.path so utils package is importable
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 # ---------------------------------------------------------------------------
 # tree-sitter imports — handled with a graceful fallback so the module can be
@@ -48,10 +54,7 @@ except ImportError:                         # pragma: no cover
         "Run: pip install tree-sitter tree-sitter-language-pack"
     )
 
-# ---------------------------------------------------------------------------
-# Module-level logger — all warnings use this; callers can configure it.
-# ---------------------------------------------------------------------------
-logger = logging.getLogger(__name__)
+from utils.logger import logger
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +86,32 @@ def _build_language():
 
 
 VUE_LANGUAGE = _build_language()
+
+
+# ---------------------------------------------------------------------------
+# Helper to find exact script tag line index
+# ---------------------------------------------------------------------------
+def find_script_tag_line(filepath: str) -> int:
+    """
+    Inspects the raw file stream line-by-line to calculate the exact 1-indexed
+    baseline row index where the opening '<script>' or '<script setup>' tag occurs.
+    Ensure that if no opening tag is present (or if analyzing a pure '.js' source file),
+    the offset gracefully defaults to zero.
+    """
+    suffix = Path(filepath).suffix.lower()
+    if suffix in ['.js', '.ts']:
+        return 0
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+            for idx, line in enumerate(fh, start=1):
+                stripped = line.strip().lower()
+                if stripped.startswith("<script") and not stripped.startswith("<script-"):
+                    return idx
+        if suffix == '.vue':
+            logger.info("[vue_parser] No <script> or <script setup> tag found in Vue component '%s'. Assigning safe fallback offset of 0.", filepath)
+    except Exception as exc:
+        logger.warning("[vue_parser] Failed to read file line-by-line: %s", exc)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +156,23 @@ def parse_vue_file(filepath: str) -> dict:
         "style_text": None,
         "is_script_setup": False,
         "script_lang": None,
-        "script_start_line": None,
+        "script_start_line": 0,
     }
+
+    # --- Native JS/TS File Bypass ---
+    suffix = Path(filepath).suffix.lower()
+    if suffix in ['.js', '.ts']:
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+                script_text = fh.read()
+            result["script_text"] = script_text
+            result["script_start_line"] = 0
+            result["script_lang"] = suffix[1:]
+            result["is_script_setup"] = False
+            return result
+        except Exception as exc:
+            logger.error("[vue_parser] Failed to read native JS/TS file '%s': %s", filepath, exc)
+            return result
 
     # --- Guard: tree-sitter must be available ---
     if not _TS_AVAILABLE or VUE_LANGUAGE is None:
@@ -199,7 +243,17 @@ def parse_vue_file(filepath: str) -> dict:
             else:
                 script_text = _extract_block_text(child, source_bytes, "script", filepath)
                 result["script_text"] = script_text
-                result["script_start_line"] = getattr(child, "start_point", (0, 0))[0] + 1
+                
+                # Enforce Tree-sitter Script Block Line Offsets
+                try:
+                    script_start_line = find_script_tag_line(filepath)
+                    if script_start_line == 0:
+                        script_start_line = getattr(child, "start_point", (0, 0))[0] + 1
+                except Exception as exc:
+                    logger.warning("[vue_parser] Offset calculation failed, defaulting to 0 for '%s': %s", filepath, exc)
+                    script_start_line = 0
+                result["script_start_line"] = script_start_line
+
 
                 # Detect <script setup> and <script lang="ts">
                 # The start_tag children contain attribute nodes
@@ -348,18 +402,20 @@ def get_all_vue_files(base_path: str) -> list[str]:
         "coverage", ".git", "__pycache__", ".vscode", ".idea",
     }
 
+    allowed_suffixes = {".vue", ".js", ".ts"}
     vue_files = sorted(
-        str(p) for p in base.rglob("*.vue")
-        if not any(part in EXCLUDED_DIRS for part in p.parts)
+        str(p) for p in base.rglob("*")
+        if p.is_file() and p.suffix.lower() in allowed_suffixes
+        and not any(part in EXCLUDED_DIRS for part in p.parts)
     )
 
     if not vue_files:
         logger.warning(
-            "[vue_parser] No .vue files found under '%s'.", base_path
+            "[vue_parser] No scan target files found under '%s'.", base_path
         )
     else:
         logger.info(
-            "[vue_parser] Found %d .vue file(s) under '%s'.",
+            "[vue_parser] Found %d scan target file(s) under '%s'.",
             len(vue_files), base_path
         )
 

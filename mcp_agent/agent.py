@@ -1070,6 +1070,9 @@ async def _run_full_codebase_async(
         for idx, fp in enumerate(complex_files, start=1):
             if fp in skip_files:
                 continue
+            if not fp.endswith('.vue'):
+                logger.info(f"Bypassing AI analysis for non-Vue asset: {fp}")
+                continue
             display_name = Path(fp).name
             print(f"[Complex {idx}/{n_complex}] Processing {display_name}...")
             issues: Optional[List[Dict[str, Any]]] = None
@@ -1107,7 +1110,7 @@ async def _run_full_codebase_async(
         for batch_start in range(0, n_simple, SIMPLE_FILE_BATCH_SIZE):
             batch = simple_files[batch_start : batch_start + SIMPLE_FILE_BATCH_SIZE]
             batch_num = batch_start // SIMPLE_FILE_BATCH_SIZE + 1
-            batch_to_run = [f for f in batch if f not in skip_files]
+            batch_to_run = [f for f in batch if f not in skip_files and f.endswith('.vue')]
             if not batch_to_run:
                 continue
             n_in_batch = len(batch_to_run)
@@ -1153,6 +1156,9 @@ async def _run_full_codebase_async(
 
 
 def analyze_single_file(file_path: str, run_id: int = 1) -> List[Dict[str, Any]]:
+    if not file_path.endswith('.vue'):
+        logger.info("Bypassing AI analysis for non-Vue asset: %s", file_path)
+        return []
     cfg = _load_config()
     base_path = cfg.get("base_path")
     project_name = cfg.get("project_name", "default")
@@ -1198,6 +1204,11 @@ def analyze_file_batch(file_paths: List[str], run_id: int = 1) -> Dict[str, List
     """
     Analyze up to 8 (or fewer) files in one LLM call. Returns written records per file_path.
     """
+    filtered_paths = [fp for fp in file_paths if fp.endswith('.vue')]
+    if not filtered_paths:
+        logger.info("Bypassing AI analysis for batch since no Vue assets are present.")
+        return {fp: [] for fp in file_paths}
+
     cfg = _load_config()
     base_path = cfg.get("base_path")
     project_name = cfg.get("project_name", "default")
@@ -1214,7 +1225,7 @@ def analyze_file_batch(file_paths: List[str], run_id: int = 1) -> Dict[str, List
                 suffix = CRITICAL_JSON_RETRY_SUFFIX if attempt == 1 else ""
                 try:
                     raw = await _run_batch_prompt_only(
-                        client, llm, file_paths, prompt_suffix=suffix
+                        client, llm, filtered_paths, prompt_suffix=suffix
                     )
                     print(
                         f"DEBUG: Raw batch LLM response (first 300 chars):\n{raw[:300]}"
@@ -1225,22 +1236,22 @@ def analyze_file_batch(file_paths: List[str], run_id: int = 1) -> Dict[str, List
                 except (ValueError, json.JSONDecodeError):
                     if attempt == 0:
                         continue
-                    file_path = ", ".join(file_paths)
+                    file_path = ", ".join(filtered_paths)
                     logger.error(
                         f"Failed to parse JSON for {file_path} after retry. Skipping."
                     )
                     all_issues = None
                     break
 
+            out: Dict[str, List[Dict[str, Any]]] = {fp: [] for fp in file_paths}
             if all_issues is None:
-                return {fp: [] for fp in file_paths}
+                return out
 
-            batch_set = set(file_paths)
+            batch_set = set(filtered_paths)
             by_file = _partition_batch_issues_by_file(
                 all_issues, batch_set, base_path
             )
-            out: Dict[str, List[Dict[str, Any]]] = {}
-            for fp in file_paths:
+            for fp in filtered_paths:
                 out[fp] = _validate_and_write_issues_for_file(
                     run_id, fp, by_file.get(fp, []), base_path, project_name, db_path
                 )

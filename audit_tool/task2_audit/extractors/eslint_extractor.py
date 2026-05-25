@@ -1,7 +1,15 @@
 import subprocess
 import json
+import sys
 from pathlib import Path
 from typing import List, Dict, Any
+
+# Ensure PROJECT_ROOT is in sys.path so utils package is importable
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from utils.logger import logger
 
 
 def run_eslint_scan(target_dir: str, dirty_files: List[str] = None) -> bool:
@@ -32,20 +40,20 @@ def run_eslint_scan(target_dir: str, dirty_files: List[str] = None) -> bool:
         
         # If no dirty_files is provided, scan entire directory (original behavior)
         if not dirty_files:
-            cmd = base_cmd + [target_dir, "--ext", ".vue,.js"]
-            print(f"[DEBUG] Executing ESLint on entire directory...")
+            cmd = base_cmd + [str(Path(target_dir).resolve()), "--ext", ".vue"]
+            logger.info("Executing ESLint on entire directory...")
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=audit_tool_dir, shell=True)
             return report_path.exists()
             
-        # Filter to only .vue and .js files from dirty_files
+        # Filter to only .vue files from dirty_files
         target_files = []
         for file_path in dirty_files:
             file_path = Path(file_path)
-            if file_path.suffix in ['.vue', '.js']:
-                target_files.append(str(file_path))
+            if file_path.suffix == '.vue':
+                target_files.append(str(file_path.resolve()))
         
         if not target_files:
-            # No .vue/.js files in dirty_files, nothing to scan
+            # No .vue files in dirty_files, nothing to scan
             return True
             
         # Chunk the target files to avoid Windows command line length limits
@@ -53,7 +61,7 @@ def run_eslint_scan(target_dir: str, dirty_files: List[str] = None) -> bool:
         chunks = [target_files[i:i + chunk_size] for i in range(0, len(target_files), chunk_size)]
         
         all_json_results = []
-        print(f"[DEBUG] Executing ESLint in {len(chunks)} chunks for {len(target_files)} files...")
+        logger.info(f"Executing ESLint in {len(chunks)} chunks for {len(target_files)} files...")
         
         for i, chunk in enumerate(chunks):
             cmd = base_cmd + chunk
@@ -68,9 +76,9 @@ def run_eslint_scan(target_dir: str, dirty_files: List[str] = None) -> bool:
                 )
                 
                 if result.returncode != 0:
-                    print(f"[DEBUG] ESLint chunk {i+1} returned non-zero exit code: {result.returncode}")
+                    logger.debug(f"ESLint chunk {i+1} returned non-zero exit code: {result.returncode}")
                     if result.stderr:
-                        print(f"[DEBUG] ESLint STDERR:\n{result.stderr}")
+                        logger.debug(f"ESLint STDERR:\n{result.stderr}")
                         
                 if report_path.exists():
                     with open(report_path, "r", encoding="utf-8") as f:
@@ -80,21 +88,25 @@ def run_eslint_scan(target_dir: str, dirty_files: List[str] = None) -> bool:
                             if isinstance(chunk_data, list):
                                 all_json_results.extend(chunk_data)
                 else:
-                    print(f"[DEBUG] ESLint report file was NOT generated for chunk {i+1}!")
+                    logger.warning(f"ESLint report file was NOT generated for chunk {i+1}!")
                     
             except Exception as e:
-                print(f"[DEBUG] Error running ESLint chunk {i+1}: {e}")
+                logger.error(f"Error running ESLint chunk {i+1}: {e}")
                 
         # Write the aggregated results back to the single report file for the parser to read
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(all_json_results, f, indent=2)
             
-        # Also return True if we have the file
-        return report_path.exists()
+        return True
             
     except Exception as e:
-        print(f"Error preparing ESLint scan: {e}")
-        return False
+        logger.error(f"Error preparing ESLint scan: {e}")
+        try:
+            with open(report_path, "w", encoding="utf-8") as f:
+                json.dump([], f)
+        except Exception:
+            pass
+        return True
 
 
 def parse_eslint_results(json_path: str = "eslint_report.json") -> List[Dict[str, Any]]:
@@ -115,7 +127,7 @@ def parse_eslint_results(json_path: str = "eslint_report.json") -> List[Dict[str
         
         # Check if file exists
         if not report_path.exists():
-            print(f"ESLint report not found: {report_path}")
+            logger.warning(f"ESLint report not found: {report_path}")
             return []
         
         # Read and parse JSON
@@ -137,6 +149,13 @@ def parse_eslint_results(json_path: str = "eslint_report.json") -> List[Dict[str
                 # Only keep severity >= 2 (Errors), ignore stylistic Warnings
                 if msg.get("severity", 0) >= 2:
                     rule_id = msg.get("ruleId", "")
+                    message_text = msg.get("message", "")
+                    
+                    # Neutralize ESLint Environment Noise / Config mismatches
+                    if "Definition for rule" in message_text and ("was not found" in message_text or message_text.endswith("was not found")):
+                        logger.debug("Filtered out ESLint environment/config rule definition noise: %s", message_text)
+                        continue
+                        
                     if rule_id and str(rule_id).startswith("vuejs-accessibility"):
                         a11y_defects += 1
                         
@@ -144,16 +163,17 @@ def parse_eslint_results(json_path: str = "eslint_report.json") -> List[Dict[str
                         "file_path": file_path,
                         "rule_id": rule_id,
                         "line": msg.get("line", 0),
-                        "message": msg.get("message", ""),
+                        "message": message_text,
                         "severity": msg.get("severity", 0)
                     })
         
-        print(f"[DEBUG] Extracted {a11y_defects} accessibility issues from ESLint JSON.")
+        logger.info(f"Extracted {a11y_defects} accessibility issues from ESLint JSON.")
         return results
         
     except json.JSONDecodeError as e:
-        print(f"Error parsing ESLint JSON: {e}")
+        logger.error(f"Error parsing ESLint JSON: {e}")
         return []
     except Exception as e:
-        print(f"Error reading ESLint report: {e}")
+        logger.error(f"Error reading ESLint report: {e}")
         return []
+

@@ -103,10 +103,12 @@ def get_all_vue_files(base_path: str) -> list:
     if not base.exists() or not base.is_dir():
         return []
 
+    allowed_suffixes = {".vue", ".js", ".ts"}
     results = []
-    for p in base.rglob("*.vue"):
-        # Check if any parent directory is in the exclusion set
-        if not any(part in EXCLUDED_DIRS for part in p.parts):
-            results.append(str(p))
+    for p in base.rglob("*"):
+        if p.is_file() and p.suffix.lower() in allowed_suffixes:
+            # Check if any parent directory is in the exclusion set
+            if not any(part in EXCLUDED_DIRS for part in p.parts):
+                results.append(str(p))
 
     return sorted(results)

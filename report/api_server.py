@@ -506,13 +506,13 @@ def get_summary():
         
         # Total files
         total_files = conn.execute(
-            "SELECT COUNT(*) as count FROM vue_files WHERE run_id = ?",
+            "SELECT COUNT(*) as count FROM vue_files WHERE run_id = ? AND file_path LIKE '%.vue'",
             (run_id,)
         ).fetchone()["count"]
         
         # Total ESLint flags
         total_eslint = conn.execute(
-            "SELECT COALESCE(SUM(eslint_flag_count), 0) as count FROM vue_files WHERE run_id = ?",
+            "SELECT COALESCE(SUM(eslint_flag_count), 0) as count FROM vue_files WHERE run_id = ? AND file_path LIKE '%.vue'",
             (run_id,)
         ).fetchone()["count"]
         
@@ -538,7 +538,7 @@ def get_summary():
             """
             SELECT AVG(COALESCE(cyclomatic_complexity, 0)) as avg_complexity
             FROM vue_files
-            WHERE run_id = ?
+            WHERE run_id = ? AND file_path LIKE '%.vue'
             """,
             (run_id,)
         ).fetchone()["avg_complexity"] or 0
@@ -603,7 +603,7 @@ def get_worst_offenders():
                 WHERE run_id = ? AND phase = 'file_analysis'
                 GROUP BY file_path
             ) ai ON ai.file_path = vf.file_path
-            WHERE vf.run_id = ?
+            WHERE vf.run_id = ? AND vf.file_path LIKE '%.vue'
             ORDER BY composite_score DESC
             LIMIT ?
             """,
@@ -661,7 +661,7 @@ def get_files():
                 WHERE run_id = ? AND phase = 'file_analysis'
                 GROUP BY file_path
             ) ai ON ai.file_path = vf.file_path
-            WHERE vf.run_id = ?
+            WHERE vf.run_id = ? AND vf.file_path LIKE '%.vue'
             ORDER BY vf.file_path
             """,
             (run_id, run_id, run_id)
