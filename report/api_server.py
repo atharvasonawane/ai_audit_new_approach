@@ -1595,10 +1595,14 @@ def _resolve_base_url(base_url: str) -> str:
     return base_url.rstrip("/") + "/api/v1"
 
 
-def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str) -> str:
+def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str):
     """
     Dynamically compile context from database tables based on run_id and case-insensitive keywords in message.
+    Returns a tuple of (context_str, sources_list) where sources_list documents which DB tables were queried.
     """
+    # --- Source citation tracker: appended for each triggered query branch ---
+    sources = []
+
     # 1. Always Fetch: General audit run stats
     run_row = conn.execute(
         "SELECT id, project_name, started_at, status, completed_at, total_files, synthesis_text FROM audit_runs WHERE id = ?",
@@ -1606,7 +1610,7 @@ def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str) 
     ).fetchone()
     
     if not run_row:
-        return "No audit run details found for this run_id."
+        return "No audit run details found for this run_id.", []
         
     proj_name = run_row["project_name"]
     started_at = run_row["started_at"]
@@ -1628,6 +1632,12 @@ def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str) 
         "SELECT COUNT(*) as count FROM ai_issues WHERE run_id = ? AND phase = 'file_analysis'",
         (run_id,)
     ).fetchone()["count"]
+
+    # Core tables are always queried
+    sources.append("Table: audit_runs (Run Metadata & Status)")
+    sources.append("Table: vue_files (Aggregate ESLint Flag Counts)")
+    sources.append("Table: accessibility_defects (Aggregate WCAG Defect Counts)")
+    sources.append("Table: ai_issues (Aggregate AI Issue Counts)")
     
     context_parts = [
         f"CURRENT ACTIVE VIEW CONTEXT: The user is looking at audit run ID: {run_id}. Project name: {proj_name}, analyzed on {started_at}.",
@@ -1696,6 +1706,10 @@ def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str) 
                 matched_files.append(row)
             
     if matched_files:
+        sources.append("Table: vue_files (Targeted File Data Scan)")
+        sources.append("Table: file_flags (ESLint Flags per Mentioned File)")
+        sources.append("Table: accessibility_defects (WCAG Defects per Mentioned File)")
+        sources.append("Table: ai_issues (AI Issues per Mentioned File)")
         context_parts.append("=== SPECIFIC FILE DETAILS (Triggered by File Mentions) ===")
         for f in matched_files:
             fp = f["file_path"]
@@ -1743,6 +1757,8 @@ def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str) 
     worst_triggered = any(kw in message_lower for kw in worst_keywords)
     
     if worst_triggered:
+        sources.append("Table: vue_files (Worst Offenders by Composite Score)")
+        sources.append("Table: ai_issues (Critical & High Severity Ranking)")
         context_parts.append("=== WORST OFFENDERS & CRITICAL RISKS (Triggered by Severity Keywords) ===")
         # Top 5 worst offenders in vue_files (highest ESLint flags or complexity)
         worst_files = conn.execute(
@@ -1780,6 +1796,7 @@ def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str) 
         
     # 4. Fallback context: Pull executive summary if no exact keywords match
     if not matched_files and not worst_triggered:
+        sources.append("Table: audit_runs (Executive Synthesis Summary)")
         context_parts.append("=== HIGH-LEVEL EXECUTIVE SUMMARY (Fallback Context) ===")
         synthesis_text = run_row["synthesis_text"]
         if synthesis_text:
@@ -1787,8 +1804,9 @@ def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str) 
         else:
             context_parts.append("No executive synthesis was generated for this audit run yet.")
         context_parts.append("")
-        
-    return "\n".join(context_parts)
+
+    logger.info(f"Chat context assembled. Active source citations: {sources}")
+    return "\n".join(context_parts), sources
 
 
 @app.route("/api/chat", methods=["POST"])
@@ -1831,7 +1849,7 @@ def chat():
             if resolved_id is not None:
                 run_id = resolved_id
         try:
-            context = _assemble_chat_context(conn, run_id, message)
+            context, sources = _assemble_chat_context(conn, run_id, message)
         finally:
             conn.close()
             
@@ -1907,6 +1925,9 @@ def chat():
         )
         
         def stream_generator():
+            # Dispatch source citations meta-event as the very first SSE frame
+            yield f"data: {json.dumps({'sources': sources})}\n\n"
+            logger.info(f"SSE sources meta-event dispatched with {len(sources)} citation(s).")
             try:
                 # Direct streaming read from urllib standard library
                 response = urllib.request.urlopen(req, timeout=timeout)

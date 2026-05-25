@@ -293,7 +293,7 @@
       </div>
     </div>
     <!-- Chatbot Sidebar -->
-    <Chatbot :is-open="isChatOpen" :run-id="currentRunId" @close="isChatOpen = false" />
+    <Chatbot :is-open="isChatOpen" :run-id="currentRunId" @close="isChatOpen = false" @navigate-to-file="navigateToFile" />
   </div>
 </template>
 

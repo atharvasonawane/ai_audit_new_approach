@@ -43,18 +43,71 @@
         </span>
         <div 
           :class="[
-            'px-4 py-3 rounded-2xl text-[13px] leading-relaxed shadow-sm font-normal break-words',
+            'px-4 py-3 rounded-2xl text-[13px] leading-relaxed shadow-sm font-normal break-words w-full',
             msg.role === 'user' 
               ? 'bg-emerald-600 text-white rounded-tr-none' 
               : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-tl-none border border-gray-200/20'
           ]"
         >
-          <!-- Handle streaming markdown-like response simply -->
-          <div class="whitespace-pre-wrap font-sans">{{ msg.content }}</div>
+          <!-- Streaming placeholder dots -->
           <div v-if="msg.isStreaming && !msg.content" class="flex items-center gap-1 py-1">
             <span class="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
             <span class="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
             <span class="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+          </div>
+
+          <!-- Message content with inline file badges -->
+          <div v-if="msg.content" class="whitespace-pre-wrap font-sans">
+            <template v-for="(part, pi) in renderBadges(msg.content)" :key="pi">
+              <!-- File badge: clickable token that navigates the dashboard to the file -->
+              <button
+                v-if="part.isFile"
+                class="bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded cursor-pointer hover:underline font-mono inline-block text-[11px] mx-0.5 transition-colors"
+                :title="'Jump to ' + part.text"
+                @click="$emit('navigate-to-file', part.text)"
+              >{{ part.text }}</button>
+              <!-- Plain text span -->
+              <span v-else>{{ part.text }}</span>
+            </template>
+          </div>
+        </div>
+
+        <!-- Sources Accordion: only shown below assistant messages with cited sources -->
+        <div
+          v-if="msg.role === 'assistant' && msg.sources && msg.sources.length > 0"
+          class="mt-1.5 w-full border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 rounded-md text-xs overflow-hidden"
+        >
+          <!-- Accordion toggle header -->
+          <button
+            class="w-full flex items-center justify-between px-3 py-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+            @click="msg.sourcesOpen = !msg.sourcesOpen"
+          >
+            <span class="flex items-center gap-1.5 font-semibold tracking-wide">
+              <span>📂</span>
+              <span>Grounded Analysis Data Sources</span>
+            </span>
+            <svg
+              width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              :class="['transition-transform duration-200', msg.sourcesOpen ? 'rotate-180' : '']"
+            >
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <!-- Accordion body -->
+          <div
+            v-show="msg.sourcesOpen"
+            class="border-t border-gray-200 dark:border-gray-800 px-3 py-2"
+          >
+            <ul class="space-y-1">
+              <li
+                v-for="(src, si) in msg.sources"
+                :key="si"
+                class="flex items-start gap-1.5 text-gray-500 dark:text-gray-400"
+              >
+                <span class="mt-0.5 shrink-0 text-emerald-500">•</span>
+                <span>{{ src }}</span>
+              </li>
+            </ul>
           </div>
         </div>
       </div>
@@ -102,7 +155,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
@@ -118,7 +171,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['close'])
+const emit = defineEmits(['close', 'navigate-to-file'])
 
 const messages = ref([])
 const inputMessage = ref('')
@@ -141,13 +194,72 @@ watch(messages, () => {
   nextTick(scrollToBottom)
 }, { deep: true })
 
-watch(() => props.runId, () => {
+// ── localStorage persistence ──────────────────────────────────────────────────
+// One storage slot per audit run so switching runs instantly swaps conversation
+const storageKey = computed(() => `audit_chat_history_${props.runId}`)
+
+/**
+ * loadChatHistory — rehydrates messages from localStorage for the current run.
+ * Strips `isStreaming` flags so stale "thinking" states never resurrect on load.
+ * Strips `sourcesOpen` so accordions always start collapsed.
+ * Falls back to an empty array if nothing is stored or JSON is corrupt.
+ */
+const loadChatHistory = () => {
+  try {
+    const raw = localStorage.getItem(storageKey.value)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        // Sanitize each rehydrated message before restoring
+        messages.value = parsed.map(m => ({
+          ...m,
+          isStreaming: false,   // Never restore a mid-stream state
+          sourcesOpen: false    // Accordions always start closed on reload
+        }))
+        return
+      }
+    }
+  } catch (e) {
+    console.warn('[Chat] localStorage parse error — resetting history for run', props.runId, e)
+  }
+  // Nothing stored or corrupt — start with a clean slate
   messages.value = []
-})
+}
+
+// Immediately load history for the initial runId, then reload whenever it changes
+watch(() => props.runId, () => {
+  loadChatHistory()
+}, { immediate: true })
 
 const selectChip = (chipText) => {
   inputMessage.value = chipText
   submitMessage()
+}
+
+/**
+ * renderBadges: Splits a message string into text/file-badge segments.
+ * Any token ending in .vue, .js, or .ts is returned as { isFile: true, text }.
+ * Plain text segments are returned as { isFile: false, text }.
+ */
+const FILE_TOKEN_RE = /([\w./\-]+\.(?:vue|js|ts))/g
+const renderBadges = (content) => {
+  if (!content) return [{ isFile: false, text: '' }]
+  const parts = []
+  let lastIndex = 0
+  let match
+  // Reset lastIndex for each call
+  FILE_TOKEN_RE.lastIndex = 0
+  while ((match = FILE_TOKEN_RE.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ isFile: false, text: content.slice(lastIndex, match.index) })
+    }
+    parts.push({ isFile: true, text: match[1] })
+    lastIndex = FILE_TOKEN_RE.lastIndex
+  }
+  if (lastIndex < content.length) {
+    parts.push({ isFile: false, text: content.slice(lastIndex) })
+  }
+  return parts
 }
 
 const submitMessage = async () => {
@@ -160,17 +272,21 @@ const submitMessage = async () => {
   messages.value.push({
     role: 'user',
     content: cleanMsg,
-    isStreaming: false
+    isStreaming: false,
+    sources: [],
+    sourcesOpen: false
   })
   
   inputMessage.value = ''
   isLoading.value = true
 
-  // 2. Push streaming assistant placeholder
+  // 2. Push streaming assistant placeholder — includes sources + accordion state
   messages.value.push({
     role: 'assistant',
     content: '',
-    isStreaming: true
+    isStreaming: true,
+    sources: [],
+    sourcesOpen: false
   })
 
   try {
@@ -199,34 +315,72 @@ const submitMessage = async () => {
     const reader = response.body.getReader()
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
+    let isDone = false  // Outer-loop sentinel so [DONE] breaks the while, not just the for
 
-    while (true) {
+    while (!isDone) {
       const { done, value } = await reader.read()
       if (done) break
 
+      // Append newly decoded bytes — keep stream:true so multi-byte chars survive chunk splits
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
-      buffer = lines.pop() // Keep the last incomplete part in the buffer
+      // Retain the last (possibly incomplete) segment for the next iteration
+      buffer = lines.pop() ?? ''
 
       for (const line of lines) {
         const cleaned = line.trim()
+        // Skip blank lines (SSE uses blank lines as event separators)
         if (!cleaned) continue
-        if (cleaned.startsWith('data:')) {
-          const dataStr = cleaned.slice(5).trim()
-          if (dataStr === '[DONE]') {
-            break
-          }
-          try {
-            const dataJson = JSON.parse(dataStr)
-            if (dataJson.token) {
-              messages.value[messages.value.length - 1].content += dataJson.token
-            } else if (dataJson.error) {
-              messages.value[messages.value.length - 1].content += `\n[Error: ${dataJson.error}]`
-            }
-          } catch (e) {
-            console.error('Failed to parse SSE token:', e)
-          }
+
+        // Only process lines that carry a data payload
+        if (!cleaned.startsWith('data:')) continue
+
+        const dataStr = cleaned.slice(5).trim()
+
+        // ── TERMINAL FRAME ─────────────────────────────────────────────────────
+        if (dataStr === '[DONE]') {
+          isDone = true
+          break  // Exit the for-loop; the while condition will prevent re-entry
         }
+
+        // ── STRUCTURED PAYLOAD ────────────────────────────────────────────────
+        let parsed
+        try {
+          parsed = JSON.parse(dataStr)
+        } catch (e) {
+          // Malformed JSON — log and skip; never touch content
+          console.warn('[SSE] Failed to parse frame payload:', dataStr, e)
+          continue
+        }
+
+        // Guard: parsed must be a plain object, not an array or primitive
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          console.warn('[SSE] Unexpected non-object frame — discarding:', parsed)
+          continue
+        }
+
+        // ── BRANCH 1: sources meta-event ─────────────────────────────────────
+        // This is the grounding provenance initialization packet that the backend
+        // dispatches as the very first SSE frame. It must NEVER reach content.
+        if ('sources' in parsed && Array.isArray(parsed.sources)) {
+          messages.value[messages.value.length - 1].sources = parsed.sources
+          continue  // Explicit early exit — nothing else to do for this frame
+        }
+
+        // ── BRANCH 2: token text fragment ────────────────────────────────────
+        // Strictly verify token is a non-empty string primitive before appending.
+        if ('token' in parsed && typeof parsed.token === 'string' && parsed.token.length > 0) {
+          messages.value[messages.value.length - 1].content += parsed.token
+          continue
+        }
+
+        // ── BRANCH 3: upstream error payload ─────────────────────────────────
+        if ('error' in parsed && typeof parsed.error === 'string' && parsed.error.length > 0) {
+          messages.value[messages.value.length - 1].content += `\n[Error: ${parsed.error}]`
+          continue
+        }
+
+        // Any other unknown key structure is silently discarded — not appended
       }
     }
   } catch (err) {
@@ -235,6 +389,19 @@ const submitMessage = async () => {
   } finally {
     messages.value[messages.value.length - 1].isStreaming = false
     isLoading.value = false
+    // ── Persist completed exchange to localStorage ────────────────────────────
+    // Serialise after isStreaming is cleared so stored snapshots are always clean.
+    // Drop sourcesOpen (UI-only toggle state) before writing — it's not meaningful
+    // across sessions and inflates the stored payload needlessly.
+    try {
+      const toStore = messages.value.map(m => {
+        const { sourcesOpen, ...rest } = m
+        return rest
+      })
+      localStorage.setItem(storageKey.value, JSON.stringify(toStore))
+    } catch (e) {
+      console.warn('[Chat] Failed to persist chat history to localStorage:', e)
+    }
   }
 }
 </script>
