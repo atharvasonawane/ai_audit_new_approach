@@ -17,7 +17,7 @@
     <!-- Main Content -->
     <div class="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 flex-1 min-h-0">
       <!-- Left Panel: Recent Audits -->
-      <div class="flex flex-col h-[400px] lg:h-full min-h-0 overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm rounded-xl transition-all duration-300 hover:border-gray-300 dark:hover:border-gray-700">
+      <div class="flex flex-col h-[520px] min-h-0 overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm rounded-xl transition-all duration-300 hover:border-gray-300 dark:hover:border-gray-700">
         <div class="flex items-center justify-between py-5 px-6 border-b border-gray-100 dark:border-gray-800/50 shrink-0">
           <h3 class="text-[14px] font-bold m-0 tracking-[-0.01em] text-gray-800 dark:text-gray-100">Recent Audits</h3>
           <span class="font-mono text-[10px] py-0.5 px-2 bg-blue-500/10 border border-blue-500/20 rounded-md text-blue-600 dark:text-blue-400 font-bold">{{ recentAudits.length }}</span>
