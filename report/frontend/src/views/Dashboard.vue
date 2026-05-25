@@ -42,13 +42,21 @@
           <h1 class="text-[32px] font-extrabold text-gray-900 dark:text-gray-50 tracking-[-0.02em] mb-2">Audit Dashboard</h1>
           <p class="text-sm text-gray-500 dark:text-gray-400">Comprehensive analysis of your codebase quality and health</p>
         </div>
-        <button class="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg text-[13px] font-semibold transition-all duration-200 shadow-[0_4px_12px_rgba(59,130,246,0.2)] hover:from-blue-600 hover:to-blue-700 hover:shadow-[0_6px_20px_rgba(59,130,246,0.3)] hover:-translate-y-[1px]" @click="fetchDashboardData">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M1 4s1-3 7-3a7 7 0 010 14c-3 0-5.5-1.5-6.5-4"/>
-            <path d="M1 1v3h3"/>
-          </svg>
-          Re-Audit
-        </button>
+        <div class="flex items-center gap-3">
+          <button class="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg text-[13px] font-semibold transition-all duration-200 shadow-[0_4px_12px_rgba(59,130,246,0.2)] hover:from-blue-600 hover:to-blue-700 hover:shadow-[0_6px_20px_rgba(59,130,246,0.3)] hover:-translate-y-[1px]" @click="fetchDashboardData">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 4s1-3 7-3a7 7 0 010 14c-3 0-5.5-1.5-6.5-4"/>
+              <path d="M1 1v3h3"/>
+            </svg>
+            Re-Audit
+          </button>
+          <button class="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-br from-emerald-500 to-emerald-600 text-white rounded-lg text-[13px] font-semibold transition-all duration-200 shadow-[0_4px_12px_rgba(16,185,129,0.2)] hover:from-emerald-600 hover:to-emerald-700 hover:shadow-[0_6px_20px_rgba(16,185,129,0.3)] hover:-translate-y-[1px]" @click="isChatOpen = !isChatOpen">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+            </svg>
+            Audit Librarian Chat
+          </button>
+        </div>
       </div>
 
       <!-- Executive Summary -->
@@ -284,6 +292,8 @@
         </div>
       </div>
     </div>
+    <!-- Chatbot Sidebar -->
+    <Chatbot :is-open="isChatOpen" :run-id="currentRunId" @close="isChatOpen = false" />
   </div>
 </template>
 
@@ -291,9 +301,11 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { filesAPI } from '../api.js'
+import Chatbot from '../components/Chatbot.vue'
 
 const route = useRoute()
 const router = useRouter()
+const isChatOpen = ref(false)
 const loading = ref(false)
 const error = ref(null)
 const summary = ref({})

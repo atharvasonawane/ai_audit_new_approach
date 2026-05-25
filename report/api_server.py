@@ -12,10 +12,20 @@ import sqlite3
 import subprocess
 import os
 import sys
+import re
+import urllib.request
+import urllib.error
 from pathlib import Path
+
+# Resolve project root and insert into sys.path to allow clean imports from the root folder
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from typing import Any, Dict, List, Optional
 
 import yaml
+
 import logging
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -26,18 +36,15 @@ active_scan_process = None
 active_scan_lock = threading.Lock()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('api_server')
+from utils.logger import logger
+
 
 app = Flask(__name__)
 CORS(app)
 
 # Load configuration
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "audit_tool" / "config" / "project_config.yaml"
+
 
 
 def _load_config() -> Dict[str, Any]:
@@ -1556,6 +1563,390 @@ def get_cycles():
             data = json.load(f)
         return jsonify(data.get("cycles", []))
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _load_env_file():
+    """Safely load key-value pairs from .env into os.environ."""
+    env_path = PROJECT_ROOT / ".env"
+    if env_path.exists():
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        if "=" in line:
+                            k, v = line.split("=", 1)
+                            os.environ[k.strip()] = v.strip()
+            logger.info("Successfully loaded environment configuration from workspace .env file.")
+        except Exception as e:
+            logger.error(f"Error loading environment file: {e}")
+
+
+def _resolve_base_url(base_url: str) -> str:
+    if not base_url:
+        raise ValueError("OPENWEBUI_BASE_URL is required")
+    # Return as-is if already ends with /api/v1 or /openai/v1 (Groq format)
+    if base_url.endswith("/api/v1") or base_url.endswith("/openai/v1"):
+        return base_url
+    # Convert /v1 to /api/v1 for OpenWebUI/Ollama compatibility
+    if base_url.endswith("/v1"):
+        return base_url[: -len("/v1")] + "/api/v1"
+    return base_url.rstrip("/") + "/api/v1"
+
+
+def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str) -> str:
+    """
+    Dynamically compile context from database tables based on run_id and case-insensitive keywords in message.
+    """
+    # 1. Always Fetch: General audit run stats
+    run_row = conn.execute(
+        "SELECT id, project_name, started_at, status, completed_at, total_files, synthesis_text FROM audit_runs WHERE id = ?",
+        (run_id,)
+    ).fetchone()
+    
+    if not run_row:
+        return "No audit run details found for this run_id."
+        
+    proj_name = run_row["project_name"]
+    started_at = run_row["started_at"]
+    completed_at = run_row["completed_at"]
+    total_files = run_row["total_files"]
+    
+    # Query summary counts
+    eslint_flag_count = conn.execute(
+        "SELECT COALESCE(SUM(eslint_flag_count), 0) as count FROM vue_files WHERE run_id = ?",
+        (run_id,)
+    ).fetchone()["count"]
+    
+    accessibility_flag_count = conn.execute(
+        "SELECT COUNT(*) as count FROM accessibility_defects WHERE run_id = ?",
+        (run_id,)
+    ).fetchone()["count"]
+    
+    ai_issue_count = conn.execute(
+        "SELECT COUNT(*) as count FROM ai_issues WHERE run_id = ? AND phase = 'file_analysis'",
+        (run_id,)
+    ).fetchone()["count"]
+    
+    context_parts = [
+        f"CURRENT ACTIVE VIEW CONTEXT: The user is looking at audit run ID: {run_id}. Project name: {proj_name}, analyzed on {started_at}.",
+        "",
+        "=== CORE AUDIT RUN DETAILS (Always Fetched) ===",
+        f"Run ID: {run_id}",
+        f"Project Name: {proj_name}",
+        f"Started At: {started_at}",
+        f"Completed At: {completed_at}",
+        f"Total Scanned Files: {total_files}",
+        "Aggregate Issue Metrics:",
+        f"  - Total ESLint Flags: {eslint_flag_count}",
+        f"  - Total Accessibility (WCAG) Defects: {accessibility_flag_count}",
+        f"  - Total AI Code Quality Issues: {ai_issue_count}",
+        ""
+    ]
+    
+    message_lower = message.lower()
+    
+    # 2. File mentions: Search for words matching custom components
+    # Gather all file paths in this run
+    all_files_rows = conn.execute(
+        "SELECT file_path FROM vue_files WHERE run_id = ?",
+        (run_id,)
+    ).fetchall()
+    file_paths = [r["file_path"] for r in all_files_rows]
+    
+    extracted_words = []
+    # Scan for expressions containing explicit extensions (e.g. '.vue', '.js', '.ts')
+    words = re.findall(r'[\w\.\-/]+', message_lower)
+    has_ext = False
+    for w in words:
+        if any(ext in w for ext in ('.vue', '.js', '.ts')):
+            has_ext = True
+            cleaned_w = w.strip("./- ")
+            if cleaned_w:
+                extracted_words.append(cleaned_w)
+                
+    # If no exact extension is found, check if any unique alphanumeric words longer than 3 characters match
+    if not has_ext:
+        raw_words = re.findall(r'[a-zA-Z0-9]{4,}', message_lower)
+        for rw in raw_words:
+            for fp in file_paths:
+                filename_lower = os.path.basename(fp).lower()
+                if rw in filename_lower or rw in fp.lower():
+                    if rw not in extracted_words:
+                        extracted_words.append(rw)
+                        
+    # Execute database lookup using wildcard approach
+    matched_files = []
+    seen_paths = set()
+    for clean_name in extracted_words:
+        file_rows = conn.execute(
+            """
+            SELECT file_path, script_lines, template_lines, eslint_flag_count, cyclomatic_complexity 
+            FROM vue_files 
+            WHERE run_id = ? AND LOWER(file_path) LIKE ?
+            """,
+            (run_id, f"%{clean_name}%")
+        ).fetchall()
+        
+        for row in file_rows:
+            fp = row["file_path"]
+            if fp not in seen_paths:
+                seen_paths.add(fp)
+                matched_files.append(row)
+            
+    if matched_files:
+        context_parts.append("=== SPECIFIC FILE DETAILS (Triggered by File Mentions) ===")
+        for f in matched_files:
+            fp = f["file_path"]
+            context_parts.extend([
+                f"File: {fp}",
+                f"  - Script Lines: {f['script_lines']}",
+                f"  - Template Lines: {f['template_lines']}",
+                f"  - Cyclomatic Complexity: {f['cyclomatic_complexity']}",
+                f"  - ESLint Flags Count: {f['eslint_flag_count']}"
+            ])
+            
+            # Fetch ESLint flags for this file
+            flags = conn.execute(
+                "SELECT rule, message, line_number FROM file_flags WHERE run_id = ? AND file_path = ? AND category = 'eslint' LIMIT 5",
+                (run_id, fp)
+            ).fetchall()
+            if flags:
+                context_parts.append("  - Sample ESLint Flags:")
+                for fl in flags:
+                    context_parts.append(f"    * Line {fl['line_number']}: [{fl['rule']}] {fl['message']}")
+            
+            # Fetch Accessibility defects for this file
+            acc = conn.execute(
+                "SELECT rule, message, line_number FROM accessibility_defects WHERE run_id = ? AND file_path = ? LIMIT 5",
+                (run_id, fp)
+            ).fetchall()
+            if acc:
+                context_parts.append("  - Sample Accessibility Defects:")
+                for ac in acc:
+                    context_parts.append(f"    * Line {ac['line_number']}: [{ac['rule']}] {ac['message']}")
+                    
+            # Fetch AI issues for this file
+            ai_issues = conn.execute(
+                "SELECT issue_category, title, description, severity, line_number FROM ai_issues WHERE run_id = ? AND file_path = ? AND phase = 'file_analysis' LIMIT 5",
+                (run_id, fp)
+            ).fetchall()
+            if ai_issues:
+                context_parts.append("  - Sample AI Issues:")
+                for ai in ai_issues:
+                    context_parts.append(f"    * Line {ai['line_number']} [{ai['severity']}]: {ai['title']} - {ai['description']}")
+            context_parts.append("")
+            
+    # 3. Severity/Worst metrics: Triggered by keywords: 'worst', 'most', 'high', 'critical'
+    worst_keywords = ["worst", "most", "high", "critical"]
+    worst_triggered = any(kw in message_lower for kw in worst_keywords)
+    
+    if worst_triggered:
+        context_parts.append("=== WORST OFFENDERS & CRITICAL RISKS (Triggered by Severity Keywords) ===")
+        # Top 5 worst offenders in vue_files (highest ESLint flags or complexity)
+        worst_files = conn.execute(
+            """
+            SELECT file_path, eslint_flag_count, cyclomatic_complexity, max_nesting_depth
+            FROM vue_files
+            WHERE run_id = ?
+            ORDER BY (COALESCE(eslint_flag_count, 0) + COALESCE(cyclomatic_complexity, 0)) DESC
+            LIMIT 5
+            """,
+            (run_id,)
+        ).fetchall()
+        
+        context_parts.append("Top 5 Worst Code Files:")
+        for idx, wf in enumerate(worst_files, 1):
+            context_parts.append(f"  {idx}. {wf['file_path']} (ESLint Flags: {wf['eslint_flag_count']}, Complexity: {wf['cyclomatic_complexity']}, Max Nesting Depth: {wf['max_nesting_depth']})")
+            
+        # Top 5 critical/high severity AI issues
+        critical_ai = conn.execute(
+            """
+            SELECT file_path, issue_category, title, severity, line_number
+            FROM ai_issues
+            WHERE run_id = ? AND severity IN ('High', 'Medium') AND phase = 'file_analysis'
+            ORDER BY CASE severity WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END
+            LIMIT 5
+            """,
+            (run_id,)
+        ).fetchall()
+        
+        if critical_ai:
+            context_parts.append("\nTop Critical/High AI Issues:")
+            for idx, ca in enumerate(critical_ai, 1):
+                context_parts.append(f"  {idx}. {ca['file_path']} [Line {ca['line_number']}] [{ca['severity']} - {ca['issue_category']}]: {ca['title']}")
+        context_parts.append("")
+        
+    # 4. Fallback context: Pull executive summary if no exact keywords match
+    if not matched_files and not worst_triggered:
+        context_parts.append("=== HIGH-LEVEL EXECUTIVE SUMMARY (Fallback Context) ===")
+        synthesis_text = run_row["synthesis_text"]
+        if synthesis_text:
+            context_parts.append(synthesis_text)
+        else:
+            context_parts.append("No executive synthesis was generated for this audit run yet.")
+        context_parts.append("")
+        
+    return "\n".join(context_parts)
+
+
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    """
+    POST /api/chat
+    Streams chatbot completions using Server-Sent Events (SSE).
+    Payload: { "run_id": int, "message": str, "history": List[dict] }
+    """
+    try:
+        data = request.get_json(silent=True)
+        logger.info(f"Incoming Chat Request Payload: {data}")
+        if not data:
+            logger.error("Chat API called with empty or invalid JSON payload.")
+            return jsonify({"error": "Invalid JSON payload"}), 400
+            
+        run_id = data.get("run_id")
+        message = data.get("message")
+        history = data.get("history", [])
+        
+        if run_id is None or message is None:
+            logger.error("Chat API missing required fields 'run_id' or 'message'.")
+            return jsonify({"error": "Missing 'run_id' or 'message' in payload"}), 400
+            
+        try:
+            run_id = int(run_id)
+        except ValueError:
+            logger.error(f"Chat API received invalid non-integer run_id: {run_id}")
+            return jsonify({"error": "run_id must be an integer"}), 400
+            
+        # Limit history to the last 6 items (rolling history limit of max 3 turns)
+        history = history[-6:]
+        
+        # Pull facts from the local database
+        conn = _db_connect()
+        
+        # Fallback to the latest run ID if run_id is 0 or None
+        if not run_id:
+            resolved_id = _get_run_id(conn, PROJECT_NAME)
+            if resolved_id is not None:
+                run_id = resolved_id
+        try:
+            context = _assemble_chat_context(conn, run_id, message)
+        finally:
+            conn.close()
+            
+        # Load environment configuration
+        _load_env_file()
+        
+        raw_base_url = os.getenv("OPENWEBUI_BASE_URL", "")
+        api_key = os.getenv("OPENWEBUI_API_KEY", "")
+        model = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+        timeout_val = os.getenv("LLM_TIMEOUT_SECONDS", "120")
+        
+        try:
+            timeout = int(timeout_val)
+        except ValueError:
+            timeout = 120
+            
+        if not raw_base_url:
+            logger.error("OPENWEBUI_BASE_URL is not configured in the environment.")
+            return jsonify({"error": "OPENWEBUI_BASE_URL environment variable is not configured"}), 500
+            
+        resolved_base_url = _resolve_base_url(raw_base_url)
+        url = f"{resolved_base_url}/chat/completions"
+        
+        # Build LLM Messages payload
+        system_prompt = (
+            "You are the Expert Code Audit Librarian Assistant, a specialized chatbot designed to answer questions "
+            "about the static analysis and AI audit metrics of the loaded codebase. "
+            "Below is the verified context and metrics pulled directly from our local database for this specific audit run:\n\n"
+            f"{context}\n\n"
+            "STRICT CONSTRAINTS:\n"
+            "- Answer questions strictly using the injected database metrics.\n"
+            "- Do not invent or guess information.\n"
+            "- If data is omitted or unknown, explicitly state that the context lacks these metrics.\n"
+            "- Guardrail: If the question is completely unrelated to the audit findings or metrics, "
+            "you MUST output exactly: \"I can only answer questions about this audit.\" and say nothing else."
+        )
+        
+        llm_messages = [{"role": "system", "content": system_prompt}]
+        
+        # Enforce history role consistency and append history
+        for msg in history:
+            role = msg.get("role")
+            content = msg.get("content")
+            if role in ("system", "user", "assistant") and content:
+                llm_messages.append({"role": role, "content": content})
+                
+        # Append the new user message
+        llm_messages.append({"role": "user", "content": message})
+        
+        # Build outbound streaming request
+        post_data = {
+            "model": model,
+            "messages": llm_messages,
+            "stream": True,
+            "temperature": 0.2
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+            
+        logger.info(f"Initiating streaming chat completions request to LLM URL: {url} with model: {model}")
+        
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(post_data).encode("utf-8"),
+            headers=headers,
+            method="POST"
+        )
+        
+        def stream_generator():
+            try:
+                # Direct streaming read from urllib standard library
+                response = urllib.request.urlopen(req, timeout=timeout)
+                for line in response:
+                    line_decoded = line.decode("utf-8").strip()
+                    if not line_decoded:
+                        continue
+                    if line_decoded.startswith("data:"):
+                        data_part = line_decoded[5:].strip()
+                        if data_part == "[DONE]":
+                            break
+                        try:
+                            data_json = json.loads(data_part)
+                            choices = data_json.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                token = delta.get("content", "")
+                                if token:
+                                    yield f"data: {json.dumps({'token': token})}\n\n"
+                        except Exception as e:
+                            logger.error(f"Error parsing SSE chunk: {line_decoded} - Error: {e}")
+            except urllib.error.HTTPError as e:
+                err_body = ""
+                try:
+                    err_body = e.read().decode("utf-8")
+                except Exception:
+                    pass
+                logger.error(f"HTTPError connecting to LLM endpoint: Status {e.code} - {e.reason} - Body: {err_body}")
+                yield f"data: {json.dumps({'error': f'LLM API HTTP Error: {e.code} - {e.reason}'})}\n\n"
+            except Exception as e:
+                logger.exception(f"Unexpected connection or streaming failure in chat completion endpoint: {e}")
+                yield f"data: {json.dumps({'error': f'Unexpected streaming exception: {str(e)}'})}\n\n"
+            finally:
+                yield "data: [DONE]\n\n"
+                logger.info("Streaming chatbot completed response.")
+                
+        return app.response_class(stream_generator(), mimetype="text/event-stream")
+        
+    except Exception as e:
+        logger.exception("An unexpected error occurred during chat endpoint initialization.")
         return jsonify({"error": str(e)}), 500
 
 
