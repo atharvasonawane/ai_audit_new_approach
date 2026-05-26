@@ -30,7 +30,19 @@
             Vue
           </div>
           <div class="min-w-0">
-            <div class="text-[14px] font-bold text-gray-900 dark:text-gray-100 font-mono overflow-hidden text-ellipsis whitespace-nowrap">{{ fileName }}</div>
+            <div class="text-[14px] font-bold text-gray-900 dark:text-gray-100 font-mono overflow-hidden text-ellipsis whitespace-nowrap flex items-center gap-3">
+              <span>{{ fileName }}</span>
+              <button
+                v-if="hasApplied"
+                @click="handleUndoFix"
+                :disabled="isUndoing"
+                class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow transition cursor-pointer disabled:opacity-50 select-none animate-pulse"
+              >
+                <span v-if="isUndoing" class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"></span>
+                <span v-else class="leading-none text-[11px] shrink-0">⟲</span>
+                Undo Last Fix
+              </button>
+            </div>
             <div class="text-[11px] text-gray-500 dark:text-gray-400 font-mono overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">{{ filePath }}</div>
           </div>
         </div>
@@ -116,14 +128,6 @@
                 <div class="flex items-start justify-between gap-3 mb-2.5">
                   <div class="text-[13px] font-bold text-gray-900 dark:text-gray-50 leading-[1.4]">{{ issue.issue_title || 'Untitled Issue' }}</div>
                   <div class="flex items-center gap-2 shrink-0">
-                    <button
-                      v-if="issue.line_number || issue.lineNumber"
-                      @click.stop="jumpToCode(issue.file_path || issue.filePath || filePath, issue.line_number || issue.lineNumber)"
-                      class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors duration-150 ease-in-out select-none cursor-pointer"
-                    >
-                      <svg class="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                      Open in Editor
-                    </button>
                     <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-[0.04em] uppercase shrink-0 border"
                           :class="{
                             'bg-red-100 text-red-500 border-red-500/30 dark:bg-red-500/10 dark:text-red-400': getSeverityClass(issue.severity) === 'badge-high',
@@ -137,6 +141,13 @@
                   <span class="inline-flex items-center gap-1 font-mono text-[10px] text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-md">Line {{ issue.line_number || 'N/A' }}</span>
                 </div>
                 <CodeSnippet v-if="issue.code_snippet" :code="issue.code_snippet" :targetLine="issue.line_number" />
+                <IssueActionBar
+                  :file-path="issue.file_path || issue.filePath || filePath"
+                  :line-number="issue.line_number || issue.lineNumber"
+                  :issue="issue"
+                  :is-loading-proposal="activeFixIssue && activeFixIssue.id === issue.id && isProposalLoading"
+                  @trigger-ai-proposal="handleTriggerAiProposal"
+                />
               </div>
             </div>
           </div>
@@ -253,6 +264,26 @@
         </div>
       </div>
     </div>
+
+    <!-- AI Fix Diff Modal -->
+    <AiFixDiffModal
+      :is-open="activeFixIssue !== null"
+      :issue="activeFixIssue || {}"
+      :run-id="runId || 0"
+      :file-path="filePath"
+      @close="handleClose"
+      @applied="handleApplied"
+    />
+
+    <!-- Stylized Toast Notifications -->
+    <div v-if="toastMessage" :class="toastType === 'success' ? 'bg-emerald-600' : 'bg-red-600'" class="fixed bottom-6 right-6 z-[100] px-4 py-3 rounded-xl text-white text-[12px] font-bold shadow-2xl flex items-center gap-2 transition-all duration-300 select-none">
+      <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" v-if="toastType === 'success'"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" v-else/>
+      </svg>
+      {{ toastMessage }}
+    </div>
+
   </div>
 </template>
 
@@ -262,6 +293,8 @@ import { useRoute } from 'vue-router'
 import { filesAPI } from '../api.js'
 import CodeSnippet from './CodeSnippet.vue'
 import { useVsCode } from '../composables/useVsCode.js'
+import IssueActionBar from './IssueActionBar.vue'
+import AiFixDiffModal from './AiFixDiffModal.vue'
 
 const props = defineProps({
   filePath: { type: String, required: true },
@@ -279,6 +312,62 @@ const eslintFlags = ref([])
 const accessibilityDefects = ref([])
 const apiCalls = ref([])
 const activeTab = ref('ai')
+
+// AI Fix & Rollback States
+const activeFixIssue = ref(null)
+const isProposalLoading = ref(false)
+const hasApplied = ref(false)
+const isUndoing = ref(false)
+const toastMessage = ref('')
+const toastType = ref('success')
+
+const showToast = (message, type = 'success') => {
+  toastMessage.value = message
+  toastType.value = type
+  setTimeout(() => {
+    toastMessage.value = ''
+  }, 4000)
+}
+
+const handleTriggerAiProposal = (issue) => {
+  activeFixIssue.value = issue
+  isProposalLoading.value = true
+}
+
+const handleApplied = (data) => {
+  hasApplied.value = true
+  activeFixIssue.value = null
+  isProposalLoading.value = false
+  showToast(`Fix applied successfully! Backup saved as ${data.backupPath}.`, 'success')
+  fetchFileData() // Dynamically reload stats!
+}
+
+const handleClose = () => {
+  activeFixIssue.value = null
+  isProposalLoading.value = false
+}
+
+const handleUndoFix = async () => {
+  isUndoing.value = true
+  try {
+    const res = await fetch(`http://localhost:5000/api/ai-fix/undo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_path: props.filePath })
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Server error rolling back changes.')
+    }
+    hasApplied.value = false
+    showToast("Successfully restored pre-fix state from backup.", 'success')
+    fetchFileData() // Refresh everything reactively!
+  } catch (err) {
+    showToast(err.message || 'Failed to rollback the fix.', 'error')
+  } finally {
+    isUndoing.value = false
+  }
+}
 
 const fileName = computed(() => props.filePath ? props.filePath.split('/').pop() : '')
 
