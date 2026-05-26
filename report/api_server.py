@@ -7,6 +7,7 @@ Dynamic code snippets generated for api_calls, file_flags, and accessibility_def
 """
 
 import argparse
+import ast
 import json
 import sqlite3
 import subprocess
@@ -26,7 +27,6 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-import logging
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import threading
@@ -64,6 +64,16 @@ else:
     DB_PATH = PROJECT_ROOT / "audit_history.db"
 PROJECT_NAME = CONFIG.get("project_name", "default")
 BASE_PATH = CONFIG.get("base_path", "")
+PATH_WALK_SKIP_DIRS = {
+    "node_modules", "venv", ".venv", ".git", ".gemini", "dist",
+    "out", "build", "not_important", "__pycache__", ".idea"
+}
+AI_FIX_MAX_CONTEXT_LINES = 500
+DEFAULT_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 
 
 # WCAG metadata dictionary for accessibility rules
@@ -318,6 +328,379 @@ def _resolve_absolute_path(file_path: str) -> Optional[Path]:
                 pass
             
     return None
+
+
+def _normalize_relative_path(file_path: str) -> str:
+    normalized = (file_path or "").replace("\\", "/").strip()
+    normalized = re.sub(r"^[A-Za-z]:/", "", normalized)
+    normalized = normalized.lstrip("/")
+    parts = []
+    for part in normalized.split("/"):
+        if not part or part == ".":
+            continue
+        if part == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(part)
+    return "/".join(parts)
+
+
+def _get_workspace_roots() -> List[Path]:
+    roots: List[Path] = []
+    for raw_root in [BASE_PATH, str(PROJECT_ROOT), str(PROJECT_ROOT.parent)]:
+        if not raw_root:
+            continue
+        try:
+            root_path = Path(raw_root).resolve()
+        except Exception:
+            continue
+        if root_path.exists() and root_path not in roots:
+            roots.append(root_path)
+    return roots
+
+
+def _is_path_within_roots(path: Path, roots: List[Path]) -> bool:
+    try:
+        resolved = path.resolve()
+    except Exception:
+        return False
+    for root in roots:
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _score_candidate_path(candidate: Path, expected_relative_path: str, search_roots: List[Path]) -> int:
+    candidate_parts = [part.lower() for part in candidate.parts]
+    expected_parts = [part.lower() for part in Path(expected_relative_path).parts if part]
+    candidate_posix = candidate.as_posix().lower()
+    expected_posix = expected_relative_path.lower()
+
+    score = 0
+    if expected_posix and candidate_posix.endswith(expected_posix):
+        score += 500
+
+    if expected_parts:
+        tail = candidate_parts[-len(expected_parts):]
+        if tail == expected_parts:
+            score += 400
+
+        matched_tail = 0
+        for expected_part, candidate_part in zip(reversed(expected_parts), reversed(candidate_parts)):
+            if expected_part != candidate_part:
+                break
+            matched_tail += 1
+        score += matched_tail * 35
+
+        basename = expected_parts[-1]
+        if candidate.name.lower() == basename:
+            score += 120
+
+    for root in search_roots:
+        try:
+            candidate.relative_to(root)
+            score += 80
+            break
+        except ValueError:
+            continue
+
+    # Priority boost for target project roots
+    if BASE_PATH:
+        try:
+            candidate.relative_to(Path(BASE_PATH))
+            score += 20000
+        except ValueError:
+            pass
+    if PROJECT_ROOT:
+        try:
+            candidate.relative_to(PROJECT_ROOT)
+            score += 10000
+        except ValueError:
+            pass
+
+    if PROJECT_NAME and PROJECT_NAME.lower() in candidate_posix:
+        score += 40
+
+    score -= len(candidate.parts)
+    return score
+
+
+def _find_workspace_file(expected_relative_path: str) -> Optional[Path]:
+    normalized = _normalize_relative_path(expected_relative_path)
+    if not normalized:
+        return None
+
+    search_roots = _get_workspace_roots()
+    direct_candidates: List[Path] = []
+
+    raw_candidate = Path(expected_relative_path)
+    if raw_candidate.is_absolute():
+        direct_candidates.append(raw_candidate)
+
+    for root in search_roots:
+        direct_candidates.append(root / normalized)
+
+    best_match: Optional[Path] = None
+    best_score: Optional[int] = None
+
+    for candidate in direct_candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            continue
+        if not resolved.exists() or not resolved.is_file():
+            continue
+        if not _is_path_within_roots(resolved, search_roots):
+            continue
+        score = _score_candidate_path(resolved, normalized, search_roots)
+        if best_score is None or score > best_score:
+            best_match = resolved
+            best_score = score
+
+    target_name = Path(normalized).name.lower()
+    if target_name:
+        for root in search_roots:
+            try:
+                for current_root, dirs, files in os.walk(root):
+                    dirs[:] = [d for d in dirs if d.lower() not in PATH_WALK_SKIP_DIRS]
+                    if target_name not in {name.lower() for name in files}:
+                        continue
+                    for file_name in files:
+                        if file_name.lower() != target_name:
+                            continue
+                        candidate = Path(current_root) / file_name
+                        try:
+                            resolved = candidate.resolve()
+                        except Exception:
+                            continue
+                        if not resolved.is_file():
+                            continue
+                        score = _score_candidate_path(resolved, normalized, search_roots)
+                        if best_score is None or score > best_score:
+                            best_match = resolved
+                            best_score = score
+            except Exception as walk_err:
+                logger.warning(f"[AI FIX] File crawl failed under {root}: {walk_err}")
+
+    return best_match
+
+
+def _resolve_issue_file_path(run_id: Optional[int], incoming_path: str) -> tuple[Optional[Path], str]:
+    normalized_incoming = _normalize_relative_path(incoming_path)
+    db_path_hint = normalized_incoming
+
+    if run_id:
+        conn = None
+        try:
+            conn = _db_connect()
+            db_path_hint = _resolve_db_file_path(conn, int(run_id), incoming_path)
+        except Exception as db_err:
+            logger.warning(f"[AI FIX] Failed to derive DB-backed path hint for '{incoming_path}': {db_err}")
+        finally:
+            if conn:
+                conn.close()
+
+    normalized_db_path = _normalize_relative_path(db_path_hint)
+
+    # 1. Try to find if the raw path exists directly on disk
+    for path_str in [incoming_path, db_path_hint, normalized_db_path, normalized_incoming]:
+        if not path_str:
+            continue
+        try:
+            p = Path(path_str)
+            if p.is_absolute() and p.exists() and p.is_file():
+                return p.resolve(), (normalized_db_path or normalized_incoming or path_str)
+        except Exception:
+            continue
+
+    # 2. Aggressive workspace scan matching absolute structural folder layout lineage
+    search_roots = _get_workspace_roots()
+    
+    incoming_clean = normalized_incoming.replace("\\", "/").strip("/")
+    incoming_parts = [p.lower() for p in incoming_clean.split("/") if p]
+    
+    db_clean = normalized_db_path.replace("\\", "/").strip("/") if normalized_db_path else ""
+    db_parts = [p.lower() for p in db_clean.split("/") if p] if db_clean else []
+
+    best_match = None
+    best_score = -1
+
+    for root in search_roots:
+        try:
+            root_str = str(root.resolve())
+            for current_root, dirs, files in os.walk(root_str):
+                dirs[:] = [d for d in dirs if d.lower() not in PATH_WALK_SKIP_DIRS]
+                for file_name in files:
+                    full_cand = Path(current_root) / file_name
+                    cand_posix = full_cand.as_posix().lower()
+                    cand_parts = [p for p in cand_posix.split("/") if p]
+
+                    score_incoming = 0
+                    for idx in range(1, min(len(incoming_parts), len(cand_parts)) + 1):
+                        if incoming_parts[-idx] == cand_parts[-idx]:
+                            score_incoming += 10
+                        else:
+                            break
+                    
+                    score_db = 0
+                    if db_parts:
+                        for idx in range(1, min(len(db_parts), len(cand_parts)) + 1):
+                            if db_parts[-idx] == cand_parts[-idx]:
+                                    score_db += 10
+                            else:
+                                break
+
+                    score = max(score_incoming, score_db)
+                    if score > 0:
+                        # Massive boost for matching actual BASE_PATH and PROJECT_ROOT
+                        root_boost = 0
+                        if BASE_PATH:
+                            try:
+                                full_cand.relative_to(Path(BASE_PATH))
+                                root_boost += 20000
+                            except ValueError:
+                                pass
+                        if PROJECT_ROOT:
+                            try:
+                                full_cand.relative_to(PROJECT_ROOT)
+                                root_boost += 10000
+                            except ValueError:
+                                pass
+
+                        path_len_penalty = len(cand_parts)
+                        final_score = score * 100 + root_boost - path_len_penalty
+                        if final_score > best_score:
+                            best_score = final_score
+                            best_match = full_cand
+        except Exception as e:
+            logger.warning(f"[PATH RESOLUTION] Error scanning workspace under {root}: {e}")
+
+    if best_match:
+        try:
+            resolved_best = best_match.resolve()
+            logger.info(f"[PATH RESOLUTION] Aggr structural match '{incoming_path}' to '{resolved_best}' (score: {best_score})")
+            return resolved_best, (normalized_db_path or normalized_incoming or incoming_path)
+        except Exception:
+            pass
+
+    # 3. Fallback to existing resolver logic
+    for candidate_hint in [db_path_hint, normalized_db_path, normalized_incoming, incoming_path]:
+        if not candidate_hint:
+            continue
+        resolved = _find_workspace_file(candidate_hint)
+        if resolved:
+            return resolved, (normalized_db_path or normalized_incoming or candidate_hint)
+
+    legacy_resolved = _resolve_absolute_path(incoming_path)
+    if legacy_resolved and _is_path_within_roots(legacy_resolved, _get_workspace_roots()):
+        return legacy_resolved, (normalized_db_path or normalized_incoming or incoming_path)
+
+    return None, (normalized_db_path or normalized_incoming or incoming_path)
+
+
+def _build_context_window(file_lines: List[str], issue_line: int, max_context_lines: int = AI_FIX_MAX_CONTEXT_LINES) -> Dict[str, Any]:
+    total_lines = len(file_lines)
+    if total_lines == 0:
+        return {
+            "issue_line": 1,
+            "issue_index": 0,
+            "start_idx": 0,
+            "end_idx": 0,
+            "window_text": "",
+            "window_line_count": 0,
+        }
+
+    clamped_line = max(1, min(issue_line, total_lines))
+    issue_index = clamped_line - 1
+
+    if total_lines > 500:
+        start_idx = max(0, clamped_line - 30)
+        end_idx = min(total_lines, clamped_line + 50)
+    else:
+        start_idx = 0
+        end_idx = total_lines
+
+    return {
+        "issue_line": clamped_line,
+        "issue_index": issue_index,
+        "start_idx": start_idx,
+        "end_idx": end_idx,
+        "window_text": "".join(file_lines[start_idx:end_idx]),
+        "window_line_count": end_idx - start_idx,
+    }
+
+
+def _build_llm_headers(api_key: str = "") -> Dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": DEFAULT_BROWSER_USER_AGENT,
+        "Origin": "http://localhost",
+        "Referer": "http://localhost/",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _extract_llm_message_content(response_payload: Dict[str, Any]) -> str:
+    choices = response_payload.get("choices", [])
+    if not choices:
+        return ""
+
+    message = choices[0].get("message", {})
+    content = message.get("content", "")
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        text_parts: List[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text_value = item.get("text") or item.get("content")
+                if isinstance(text_value, str):
+                    text_parts.append(text_value)
+            elif isinstance(item, str):
+                text_parts.append(item)
+        return "\n".join(text_parts)
+
+    return str(content or "")
+
+
+def _strip_non_code_lines(lines: List[str]) -> List[str]:
+    filtered: List[str] = []
+    skipping_prefix = True
+    explanatory_prefixes = (
+        "here", "fixed", "updated", "revised", "note:", "warning:",
+        "explanation:", "focus bounded window", "replacement:", "output:"
+    )
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("```"):
+            if skipping_prefix and stripped:
+                lowered = stripped.lower()
+                if lowered.startswith(explanatory_prefixes):
+                    continue
+        if stripped.startswith("```"):
+            continue
+        if stripped in {"[", "]"}:
+            continue
+        filtered.append(line)
+        if stripped:
+            skipping_prefix = False
+
+    while filtered and not filtered[0].strip():
+        filtered.pop(0)
+    while filtered and not filtered[-1].strip():
+        filtered.pop()
+
+    return filtered
 
 
 def _extract_snippet(file_path: str, line_number: int) -> str:
@@ -2040,23 +2423,38 @@ def health_check():
 
 
 def _sanitize_llm_code(text: str) -> str:
-    # Match ```[lang] <content> ```
-    match = re.search(r"```[a-zA-Z0-9_-]*\s*\n(.*?)\n\s*```", text, re.DOTALL)
-    if match:
-        return match.group(1)
-    
-    # Try match ``` without a newline immediately after
-    match = re.search(r"```[a-zA-Z0-9_-]*\s*(.*?)\s*```", text, re.DOTALL)
-    if match:
-        return match.group(1)
-        
+    if not text:
+        return ""
+
     text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", text)
-    if text.endswith("```"):
-        text = re.sub(r"\s*```$", "", text)
-        
-    return text.strip()
+
+    blocks = re.findall(r"```[a-zA-Z0-9_-]*\s*\n(.*?)\n\s*```", text, re.DOTALL)
+    if not blocks:
+        blocks = re.findall(r"```[a-zA-Z0-9_-]*\s*(.*?)\s*```", text, re.DOTALL)
+
+    if blocks:
+        best_block = ""
+        best_score = -1
+        for block in blocks:
+            lines = block.splitlines()
+            cleaned = "\n".join(_strip_non_code_lines(lines))
+            score = len(cleaned)
+            if score > best_score:
+                best_score = score
+                best_block = cleaned
+        if best_block:
+            return best_block
+
+    lines = text.splitlines()
+    cleaned_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.endswith("```"):
+            continue
+        cleaned_lines.append(line)
+
+    cleaned_lines = _strip_non_code_lines(cleaned_lines)
+    return "\n".join(cleaned_lines).strip()
 
 
 def _validate_syntax(file_path: str, code_content: str) -> tuple[bool, str]:
@@ -2130,78 +2528,432 @@ def _validate_syntax(file_path: str, code_content: str) -> tuple[bool, str]:
             return True, "Syntax validated via lightweight layout checker (braces/brackets balanced)"
 
 
+# ─── Deterministic Fix Engine ────────────────────────────────────────────────
+
+def _try_deterministic_fix(file_lines, issue_line, issue_type, issue_message,
+                           code_snippet, recommendation, file_path_str):
+    """
+    For well-known issue patterns, apply a surgical deterministic fix.
+    Returns a dict with fix details, or None if no handler matches.
+    """
+    combined_text = f"{issue_type} {issue_message} {recommendation}".lower()
+
+    # Pattern 1: Multi-word component names (vue/multi-word-component-names)
+    if "multi-word" in combined_text and ("component" in combined_text or "name" in combined_text):
+        result = _fix_multi_word_component(file_lines, issue_line, issue_type, issue_message, file_path_str)
+        if result:
+            return result
+
+    # Pattern 2: Click events must have key events
+    if "click" in combined_text and "key" in combined_text and "event" in combined_text:
+        result = _fix_click_missing_key_event(file_lines, issue_line)
+        if result:
+            return result
+
+    return None
+
+
+def _fix_multi_word_component(file_lines, issue_line, issue_type, issue_message, file_path_str):
+    """
+    Deterministic fix for vue/multi-word-component-names.
+    Renames single-word component name by prepending 'App'.
+    Handles: name: "Header", name: '', and missing name fields.
+    """
+    combined = f"{issue_type} {issue_message}"
+
+    # Step 1: Extract the expected component name from the issue text
+    expected_name = None
+    m = re.search(r'[\u201c\u201d"\u2018\u2019\'`](\w+)[\u201c\u201d"\u2018\u2019\'`]', combined)
+    if m:
+        expected_name = m.group(1)
+
+    # If we can't determine the name from the issue, derive from filename
+    if not expected_name:
+        filename = os.path.basename(file_path_str)
+        if filename.endswith('.vue'):
+            expected_name = filename[:-4]  # "Header.vue" → "Header"
+
+    if not expected_name:
+        logger.warning("[DETERMINISTIC FIX] Could not determine component name")
+        return None
+
+    # Skip if already multi-word
+    if re.search(r'[a-z][A-Z]', expected_name) or '-' in expected_name or '_' in expected_name:
+        logger.info(f"[DETERMINISTIC FIX] '{expected_name}' is already multi-word, skipping")
+        return None
+
+    new_name = "App" + expected_name
+
+    # Step 2: Find the name: declaration in the code
+    # Search the entire file for `name:` patterns in the script section
+    fixed_lines = list(file_lines)
+    changed = False
+    target_line_idx = None
+
+    # Priority 1: Search near the issue line (±15 lines)
+    search_ranges = [
+        (max(0, issue_line - 15), min(len(file_lines), issue_line + 15)),
+        (0, len(file_lines)),  # Fallback: entire file
+    ]
+
+    for search_start, search_end in search_ranges:
+        if changed:
+            break
+        for i in range(search_start, search_end):
+            line = file_lines[i]
+
+            # Case A: name: "Header" or name: 'Header' (non-empty, matches expected)
+            m = re.search(r'''(name\s*:\s*['"])''' + re.escape(expected_name) + r'''(['"])''', line)
+            if m:
+                new_line = re.sub(
+                    r'''(name\s*:\s*['"])''' + re.escape(expected_name) + r'''(['"])''',
+                    r'\g<1>' + new_name + r'\g<2>',
+                    line
+                )
+                if new_line != line:
+                    fixed_lines[i] = new_line
+                    target_line_idx = i
+                    changed = True
+                    break
+
+            # Case B: name: "" or name: '' (empty name — inject the correct name)
+            m_empty = re.search(r'''(name\s*:\s*)(['"])(['"])''', line)
+            if m_empty:
+                quote = m_empty.group(2)
+                new_line = re.sub(
+                    r'''(name\s*:\s*)(['"])(['"])''',
+                    r'\g<1>' + quote + new_name + quote,
+                    line
+                )
+                if new_line != line:
+                    fixed_lines[i] = new_line
+                    target_line_idx = i
+                    changed = True
+                    break
+
+            # Case C: name: "SomeOtherSingleWord" (any single-word name on a name: line)
+            m_any = re.search(r'''name\s*:\s*['"](\w+)['"]''', line)
+            if m_any:
+                current_name = m_any.group(1)
+                # Only fix if it's a single-word name (no camelCase)
+                if not re.search(r'[a-z][A-Z]', current_name) and '-' not in current_name and '_' not in current_name:
+                    fix_name = "App" + current_name
+                    new_line = re.sub(
+                        r'''(name\s*:\s*['"])''' + re.escape(current_name) + r'''(['"])''',
+                        r'\g<1>' + fix_name + r'\g<2>',
+                        line
+                    )
+                    if new_line != line:
+                        fixed_lines[i] = new_line
+                        target_line_idx = i
+                        new_name = fix_name  # Update for the response
+                        changed = True
+                        break
+
+    if not changed:
+        # Case D: No name: field at all — try to add one after "export default {"
+        for i in range(len(file_lines)):
+            if re.search(r'export\s+default\s*\{', file_lines[i]):
+                line_ending = "\r\n" if file_lines[i].endswith("\r\n") else "\n"
+                indent = "  "
+                m_indent = re.match(r'^(\s*)', file_lines[i])
+                if m_indent:
+                    indent = m_indent.group(1) + "  "
+                name_line = f'{indent}name: "{new_name}",{line_ending}'
+                fixed_lines.insert(i + 1, name_line)
+                target_line_idx = i + 1
+                changed = True
+                break
+
+    if not changed:
+        logger.warning(f"[DETERMINISTIC FIX] Could not apply fix for component name in {file_path_str}")
+        return None
+
+    # Step 3: Find connected references in other files
+    connected = _find_component_references(expected_name, file_path_str)
+
+    warnings = [
+        f"Component renamed: '{expected_name}' \u2192 '{new_name}' (deterministic fix applied)"
+    ]
+    if connected:
+        ref_names = [os.path.basename(c["file"]) for c in connected[:5]]
+        warnings.append(
+            f"Found {len(connected)} file(s) that reference '{expected_name}' and may need updating: "
+            + ", ".join(ref_names)
+        )
+
+    logger.info(f"[DETERMINISTIC FIX] Renamed '{expected_name}' \u2192 '{new_name}' in {file_path_str}")
+    return {
+        "fixed_lines": fixed_lines,
+        "description": f"Renamed component '{expected_name}' \u2192 '{new_name}'",
+        "old_name": expected_name,
+        "new_name": new_name,
+        "warnings": warnings,
+        "connected_changes": connected,
+    }
+
+
+def _fix_click_missing_key_event(file_lines, issue_line):
+    """
+    Deterministic fix for vuejs-accessibility/click-events-have-key-events.
+    Adds @keydown.enter alongside @click.
+    """
+    target_idx = max(0, issue_line - 1)
+    if target_idx >= len(file_lines):
+        return None
+
+    line = file_lines[target_idx]
+    if "@click" not in line and "v-on:click" not in line:
+        # Search nearby lines
+        for i in range(max(0, target_idx - 3), min(len(file_lines), target_idx + 4)):
+            if "@click" in file_lines[i] or "v-on:click" in file_lines[i]:
+                target_idx = i
+                line = file_lines[i]
+                break
+        else:
+            return None
+
+    # Check if already has a key event
+    if "@keydown" in line or "@keyup" in line or "@keypress" in line:
+        return None
+
+    fixed_lines = list(file_lines)
+
+    # Add @keydown.enter after @click="..."
+    m = re.search(r'(@click(?:\.\w+)*="[^"]*")', line)
+    if m:
+        click_attr = m.group(1)
+        # Extract the handler: @click="handler" → @keydown.enter="handler"
+        handler_match = re.search(r'="([^"]*)"', click_attr)
+        handler = handler_match.group(1) if handler_match else ""
+        keydown_attr = f' @keydown.enter="{handler}"'
+        new_line = line.replace(click_attr, click_attr + keydown_attr)
+        fixed_lines[target_idx] = new_line
+
+        # Also add tabindex="0" if not present and element is not inherently focusable
+        if 'tabindex' not in new_line and '<button' not in new_line and '<a ' not in new_line and '<input' not in new_line:
+            fixed_lines[target_idx] = fixed_lines[target_idx].replace(
+                keydown_attr,
+                keydown_attr + ' tabindex="0"'
+            )
+
+        return {
+            "fixed_lines": fixed_lines,
+            "description": f"Added @keydown.enter handler and tabindex for keyboard accessibility",
+            "warnings": ["Added @keydown.enter event handler for keyboard accessibility"],
+            "connected_changes": [],
+        }
+
+    return None
+
+
+def _find_component_references(component_name, source_file_path):
+    """Scan workspace for files that import or use the given component name."""
+    references = []
+    search_roots = _get_workspace_roots()
+    source_abs = None
+    try:
+        source_abs = str(Path(source_file_path).resolve()).lower()
+    except Exception:
+        pass
+
+    for root in search_roots:
+        try:
+            root_str = str(root)
+            for current_root, dirs, files in os.walk(root_str):
+                dirs[:] = [d for d in dirs if d.lower() not in PATH_WALK_SKIP_DIRS]
+                for fname in files:
+                    if not fname.endswith(('.vue', '.js', '.ts', '.jsx', '.tsx')):
+                        continue
+                    full_path = os.path.join(current_root, fname)
+                    try:
+                        if source_abs and str(Path(full_path).resolve()).lower() == source_abs:
+                            continue
+                    except Exception:
+                        pass
+                    try:
+                        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                            content = f.read()
+                        if re.search(r'\b' + re.escape(component_name) + r'\b', content):
+                            references.append({
+                                "file": full_path.replace("\\", "/"),
+                                "type": "reference",
+                            })
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+
+    return references
+
+
+def _build_surgical_window(file_lines, issue_line, radius=15):
+    """Build a small focused context window around the issue line for AI fix."""
+    total = len(file_lines)
+    if total == 0:
+        return 0, 0, ""
+    clamped = max(1, min(issue_line, total))
+    start_idx = max(0, clamped - 1 - radius)
+    end_idx = min(total, clamped + radius)
+    window_text = "".join(file_lines[start_idx:end_idx])
+    return start_idx, end_idx, window_text
+
+
 @app.route('/api/ai-fix', methods=['POST'])
 def ai_fix_endpoint():
     """
     POST /api/ai-fix
-    Surgically designs and returns proposed AI fixes for code issues.
-    Uses bulletproof path resolution, disk-grounded context windows,
-    anti-hallucination prompt constraints, and defensive reconstruction.
+    Surgically fixes code issues using deterministic handlers for known patterns
+    and LLM-based fixes for unknown patterns. Includes verification and
+    connected-changes detection.
     """
     try:
-        data = request.json or {}
-        run_id = data.get('run_id')
-        incoming_path = data.get('file_path', '').strip()
-        issue_line = int(data.get('issue_line', 1))
-        issue_message = data.get('issue_message', '')
+        data = request.get_json(silent=True) or {}
+        run_id = data.get("run_id")
+        incoming_path = (data.get("file_path") or "").strip()
+        issue_type = (data.get("issue_type") or "").strip()
+        issue_message = (data.get("issue_message") or "").strip()
+        code_snippet = (data.get("code_snippet") or "").strip()
+        recommendation = (data.get("recommendation") or "").strip()
 
-        logger.info(f"[AI FIX] Processing fix request for path: {incoming_path} at line {issue_line}")
-
-        # ─── 1. SAFE PATH HEALING ENGINE ───────────────────────────────
-        target_path_obj = _resolve_absolute_path(incoming_path)
-        if not target_path_obj:
-            logger.error(
-                f"[AI FIX] Resolution failed. File path completely absent from disk layout: "
-                f"{incoming_path} (workspace: {BASE_PATH or PROJECT_ROOT})"
-            )
-            return jsonify({"error": f"Physical source file not found on disk layout: {incoming_path}"}), 400
-
-        target_path = str(target_path_obj)
-        logger.info(f"[AI FIX] Path resolved successfully: {incoming_path} -> {target_path}")
-
-        # ─── 2. INGEST GROUND TRUTH SNAPSHOT FROM DISK ─────────────────
         try:
-            with open(target_path, 'r', encoding='utf-8') as f:
-                file_lines = f.readlines()
-        except Exception as e:
-            logger.error(f"[AI FIX] File ingest read failure: {str(e)}")
-            return jsonify({"error": f"Failed to ingest file layout: {str(e)}"}), 500
-
-        total_lines = len(file_lines)
-        issue_idx = issue_line - 1
-
-        # Clamp issue_line into valid range
-        if issue_idx < 0:
-            issue_idx = 0
-        if issue_idx >= total_lines:
-            issue_idx = total_lines - 1
-
-        # Bounded 1-indexed context window generation
-        start_idx = max(0, issue_idx - 15)
-        end_idx = min(total_lines, issue_idx + 25)
-
-        # This string is the single source of truth for the LEFT panel
-        original_window_text = "".join(file_lines[start_idx:end_idx])
+            issue_line = int(data.get("issue_line", 1))
+        except (TypeError, ValueError):
+            issue_line = 1
 
         logger.info(
-            f"[AI FIX] Context window: lines {start_idx + 1}-{end_idx} "
+            f"[AI FIX] Request: path={incoming_path!r} line={issue_line} "
+            f"type={issue_type[:80]!r} snippet_len={len(code_snippet)}"
+        )
+
+        # ── Step 1: Resolve file path ──
+        target_path_obj, normalized_incoming = _resolve_issue_file_path(run_id, incoming_path)
+        if not target_path_obj:
+            logger.error(f"[AI FIX] File not found on disk: {incoming_path}")
+            return jsonify({"error": f"Source file not found: {incoming_path}"}), 400
+
+        target_path = str(target_path_obj)
+        logger.info(f"[AI FIX] Resolved: {incoming_path} \u2192 {target_path}")
+
+        # ── Step 2: Read file ──
+        try:
+            with open(target_path, "r", encoding="utf-8") as f:
+                file_lines = f.readlines()
+        except Exception as exc:
+            logger.error(f"[AI FIX] Read failure: {exc}")
+            return jsonify({"error": f"Failed to read file: {exc}"}), 500
+
+        total_lines = len(file_lines)
+        issue_line = max(1, min(issue_line, total_lines))
+
+        # ── Step 3: Try deterministic fix first ──
+        det_result = _try_deterministic_fix(
+            file_lines, issue_line, issue_type, issue_message,
+            code_snippet, recommendation, target_path
+        )
+
+        if det_result:
+            logger.info(f"[AI FIX] Deterministic fix applied: {det_result['description']}")
+            fixed_lines = det_result["fixed_lines"]
+            full_file_reconstructed = "".join(fixed_lines)
+
+            # Build focused display window around the change
+            start_idx, end_idx, _ = _build_surgical_window(file_lines, issue_line, radius=15)
+            original_window = "".join(file_lines[start_idx:end_idx])
+            fixed_window = "".join(fixed_lines[start_idx:end_idx])
+
+            # Validate syntax of the full fixed file
+            syntax_valid = True
+            validation_note = "Deterministic fix applied"
+            try:
+                syntax_valid, validation_note = _validate_syntax(normalized_incoming, full_file_reconstructed)
+            except Exception as val_err:
+                logger.warning(f"[AI FIX] Syntax validation error: {val_err}")
+                validation_note = f"Validation unavailable: {val_err}"
+
+            import difflib
+            diff_lines = list(difflib.unified_diff(
+                file_lines,
+                fixed_lines,
+                fromfile=normalized_incoming,
+                tofile=normalized_incoming,
+                lineterm=""
+            ))
+
+            logger.info(
+                f"[AI FIX] Deterministic fix complete. Syntax={syntax_valid}. "
+                f"Window: lines {start_idx + 1}-{end_idx}."
+            )
+
+            return jsonify({
+                "original_text": original_window,
+                "fixed_text": fixed_window,
+                "full_fixed_content": full_file_reconstructed,
+                "full_fixed_text": full_file_reconstructed,
+                "full_original_text": "".join(file_lines),
+                "diff_text": "\n".join(diff_lines),
+                "diff_fragments": diff_lines,
+                "window_start": start_idx + 1,
+                "window_end": end_idx,
+                "file_path": normalized_incoming,
+                "resolved_file_path": target_path,
+                "syntax_valid": syntax_valid,
+                "validation_note": validation_note,
+                "warnings": det_result.get("warnings", []),
+                "connected_changes": det_result.get("connected_changes", []),
+                "fix_type": "deterministic",
+                "fix_description": det_result["description"],
+            }), 200
+
+        # ── Step 4: LLM-based fix (fallback) ──
+        logger.info("[AI FIX] No deterministic handler matched, falling back to LLM")
+
+        # Use a small surgical window (±15 lines) instead of the whole file
+        start_idx, end_idx, original_window_text = _build_surgical_window(
+            file_lines, issue_line, radius=15
+        )
+
+        logger.info(
+            f"[AI FIX] Surgical context window: lines {start_idx + 1}-{end_idx} "
             f"(issue at line {issue_line}, total {total_lines} lines)"
         )
 
-        # ─── 3. IMMUTABLE PROMPT LOCKDOWN ──────────────────────────────
+        # Build a highly focused prompt
+        problem_parts = []
+        if issue_type:
+            problem_parts.append(f"Issue: {issue_type}")
+        if issue_message:
+            problem_parts.append(f"Description: {issue_message}")
+        if recommendation:
+            problem_parts.append(f"Recommended fix: {recommendation}")
+        combined_problem = "\n".join(problem_parts) if problem_parts else "General code quality issue"
+
+        snippet_context = ""
+        if code_snippet:
+            snippet_context = (
+                f"\n\nThe exact code snippet flagged by the analyzer (with \u25ba marking the issue line):\n"
+                f"{code_snippet}\n"
+            )
+
         system_instruction = (
-            "You are a strict automated source-code correction subsystem.\n"
-            f"The file under evaluation is: {normalized_incoming}.\n"
-            f"You are given an isolated text segment bounded between lines {start_idx + 1} and {end_idx}.\n"
-            f"The user problem statement focuses exactly on Line {issue_line}, which states: '{issue_message}'.\n\n"
-            "STRICT MECHANICAL OUTPUT RULES:\n"
-            "1. Fix the problem cleanly by changing ONLY the target code lines inside the snippet.\n"
-            "2. Do not introduce broad refactorings, do not update imports, and do not fix unrelated code elements.\n"
-            "3. Output ONLY the raw replacement text lines corresponding to the focus window. "
-            "No code blocks, no explanations, no text labels, and absolutely NO markdown fences (```)."
+            "You are a surgical source-code correction engine.\n"
+            f"File: {normalized_incoming}\n"
+            f"Context window: lines {start_idx + 1} to {end_idx}.\n"
+            f"The issue is at or near line {issue_line}.\n\n"
+            f"PROBLEM:\n{combined_problem}\n"
+            f"{snippet_context}\n"
+            "RULES:\n"
+            "1. Output the ENTIRE context window with the fix applied.\n"
+            "2. You MUST change the specific lines causing the issue. If you return unchanged code, you FAILED.\n"
+            "3. Change ONLY the minimum lines needed to fix this specific issue.\n"
+            "4. Do NOT change unrelated code, do NOT add comments, do NOT refactor.\n"
+            "5. For naming rules (e.g. multi-word-component-names): rename the identifier "
+            "(e.g. 'Header' \u2192 'AppHeader').\n"
+            "6. For accessibility rules: add the missing attribute/handler.\n"
+            "7. Output raw source code ONLY. No markdown fences, no explanations, no labels.\n"
+            "8. Preserve exact indentation and whitespace."
         )
 
-        # ─── 4. LLM COMMUNICATION (aligned with proven chatbot pattern) ──
         _load_env_file()
         raw_base_url = os.getenv("OPENWEBUI_BASE_URL", "")
         api_key = os.getenv("OPENWEBUI_API_KEY", "")
@@ -2214,10 +2966,9 @@ def ai_fix_endpoint():
             timeout = 120
 
         if not raw_base_url:
-            logger.error("[AI FIX] OPENWEBUI_BASE_URL is not configured in the environment.")
+            logger.error("[AI FIX] OPENWEBUI_BASE_URL is not configured.")
             return jsonify({"error": "OPENWEBUI_BASE_URL environment variable is not configured"}), 500
 
-        # Use the same proven _resolve_base_url() helper as the chatbot endpoint
         resolved_base_url = _resolve_base_url(raw_base_url)
         api_url = f"{resolved_base_url}/chat/completions"
 
@@ -2225,36 +2976,28 @@ def ai_fix_endpoint():
             "model": model_name,
             "messages": [
                 {"role": "system", "content": system_instruction},
-                {"role": "user", "content": f"Focus Bounded Window Source Code:\n{original_window_text}"}
+                {"role": "user", "content": f"Source code (lines {start_idx + 1}-{end_idx}):\n{original_window_text}"}
             ],
             "temperature": 0.1,
             "stream": False
         }
 
-        # Headers with User-Agent to prevent 403 scraping blockades
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        logger.info(f"[AI FIX] Dispatching request to LLM URL: {api_url} with model: {model_name}")
+        headers = _build_llm_headers(api_key)
+        logger.info(f"[AI FIX] LLM request to {api_url} model={model_name}")
 
         try:
             req = urllib.request.Request(
                 api_url,
-                data=json.dumps(payload).encode('utf-8'),
+                data=json.dumps(payload).encode("utf-8"),
                 headers=headers,
                 method="POST"
             )
             with urllib.request.urlopen(req, timeout=timeout) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                choices = res_data.get('choices', [])
-                if not choices:
-                    logger.error(f"[AI FIX] LLM response lacks choices: {res_data}")
-                    return jsonify({"error": "Invalid response from LLM — no choices returned."}), 500
-                llm_output = choices[0].get('message', {}).get('content', '')
+                res_data = json.loads(response.read().decode("utf-8"))
+                llm_output = _extract_llm_message_content(res_data)
+                if not llm_output.strip():
+                    logger.error(f"[AI FIX] Empty LLM response: {res_data}")
+                    return jsonify({"error": "LLM returned an empty response."}), 500
         except urllib.error.HTTPError as http_err:
             err_body = ""
             try:
@@ -2262,68 +3005,96 @@ def ai_fix_endpoint():
             except Exception:
                 pass
             logger.error(
-                f"[AI FIX] HTTPError from LLM endpoint: Status {http_err.code} - "
-                f"{http_err.reason} - Body: {err_body[:500]}"
+                f"[AI FIX] HTTPError: {http_err.code} {http_err.reason} - {err_body[:500]}"
             )
-            return jsonify({"error": f"LLM API HTTP Error: {http_err.code} - {http_err.reason}"}), 500
+            return jsonify({"error": f"LLM API Error: {http_err.code} - {http_err.reason}"}), 500
         except Exception as api_err:
-            logger.error(f"[AI FIX] Communication framework exception: {str(api_err)}")
-            return jsonify({"error": f"LLM connection failure: {str(api_err)}"}), 500
+            logger.error(f"[AI FIX] LLM connection failure: {api_err}")
+            return jsonify({"error": f"LLM connection failure: {api_err}"}), 500
 
-        # ─── 5. DEFENSIVE OUTPUT CLEANING ──────────────────────────────
-        # Use the battle-tested _sanitize_llm_code() helper first, then line-level cleanup
+        # ── Step 5: Sanitize and process LLM output ──
         llm_cleaned = _sanitize_llm_code(llm_output)
+        cleaned_lines = _strip_non_code_lines(llm_cleaned.splitlines())
+        fixed_window_text = "\n".join(cleaned_lines)
+        if fixed_window_text and llm_cleaned.endswith(("\n", "\r")):
+            fixed_window_text += "\n"
 
-        cleaned_lines = []
-        for line in llm_cleaned.splitlines():
-            # Strip any residual markdown fences or prompt echo bleed
-            stripped = line.strip()
-            if stripped.startswith("```") or "Focus Bounded Window" in line:
-                continue
-            cleaned_lines.append(line + "\n")
+        if not fixed_window_text.strip():
+            logger.error("[AI FIX] Sanitization removed entire LLM response.")
+            return jsonify({"error": "AI proposal could not be sanitized into valid source text."}), 500
 
-        fixed_window_text = "".join(cleaned_lines)
+        # Normalize line endings to match the original file
+        fixed_window_lines = fixed_window_text.splitlines()
+        line_ending = "\r\n" if (file_lines and file_lines[0].endswith("\r\n")) else "\n"
+        fixed_window_text = "".join(line + line_ending for line in fixed_window_lines)
 
-        # ─── 6. STRUCTURAL RECONSTRUCTION & INTEGRITY CHECK ────────────
-        # Stitch focus segments back into the full file layout
+        # ── Step 6: Reconstruct full file ──
         full_file_reconstructed = (
             "".join(file_lines[:start_idx]) +
             fixed_window_text +
             "".join(file_lines[end_idx:])
         )
 
-        # Syntax validation on the reconstructed file
+        # ── Step 7: Verify the fix ──
+        response_warnings = []
+
+        # Check if fix is actually different
+        if original_window_text.strip() == fixed_window_text.strip():
+            response_warnings.append(
+                "Warning: The AI returned code identical to the original. "
+                "The model may not have understood the required fix."
+            )
+            logger.warning("[AI FIX] LLM returned identical code - fix may not be effective")
+
+        # Validate syntax
         syntax_valid = True
-        validation_note = "Syntax check skipped (non-Python file)"
+        validation_note = "Syntax check skipped"
         try:
             syntax_valid, validation_note = _validate_syntax(normalized_incoming, full_file_reconstructed)
         except Exception as val_err:
-            logger.warning(f"[AI FIX] Syntax validation skipped due to error: {val_err}")
-            validation_note = f"Syntax validation unavailable: {str(val_err)}"
+            logger.warning(f"[AI FIX] Syntax validation error: {val_err}")
+            validation_note = f"Validation unavailable: {val_err}"
+
+        if not syntax_valid:
+            response_warnings.append(f"Syntax validation failed: {validation_note}")
+
+        import difflib
+        reconstructed_lines = full_file_reconstructed.splitlines(keepends=True)
+        diff_lines = list(difflib.unified_diff(
+            file_lines,
+            reconstructed_lines,
+            fromfile=normalized_incoming,
+            tofile=normalized_incoming,
+            lineterm=""
+        ))
 
         logger.info(
-            f"[AI FIX] Fix generated for '{normalized_incoming}'. "
-            f"Syntax: {syntax_valid} ({validation_note}). "
-            f"Window: lines {start_idx + 1}-{end_idx}."
+            f"[AI FIX] LLM fix generated. Syntax={syntax_valid}. "
+            f"Window: lines {start_idx + 1}-{end_idx}. "
+            f"Diff lines: {len(diff_lines)}."
         )
 
-        # Dispatch structural JSON back to the decoupled presentation tier
         return jsonify({
             "original_text": original_window_text,
             "fixed_text": fixed_window_text,
             "full_fixed_content": full_file_reconstructed,
-            "full_fixed_text": full_file_reconstructed,    # backward compatibility
-            "full_original_text": "".join(file_lines),      # backward compatibility
-            "window_start": start_idx + 1,                  # 1-indexed for display
-            "window_end": end_idx,                           # 1-indexed for display
-            "file_path": target_path,
+            "full_fixed_text": full_file_reconstructed,
+            "full_original_text": "".join(file_lines),
+            "diff_text": "\n".join(diff_lines),
+            "diff_fragments": diff_lines,
+            "window_start": start_idx + 1,
+            "window_end": end_idx,
+            "file_path": normalized_incoming,
+            "resolved_file_path": target_path,
             "syntax_valid": syntax_valid,
-            "validation_note": validation_note
+            "validation_note": validation_note,
+            "warnings": response_warnings,
+            "fix_type": "llm",
         }), 200
 
-    except Exception as e:
+    except Exception as exc:
         logger.exception("[AI FIX] Unexpected error inside /api/ai-fix route:")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(exc)}), 500
 
 
 
@@ -2347,7 +3118,7 @@ def ai_fix_apply():
             logger.error("AI Fix Apply missing 'file_path' or 'fixed_content'.")
             return jsonify({"error": "Missing required 'file_path' or 'fixed_content'"}), 400
 
-        abs_path = _resolve_absolute_path(file_path)
+        abs_path, _ = _resolve_issue_file_path(None, file_path)
         if not abs_path:
             logger.error(f"Unable to resolve file path for apply: {file_path}")
             return jsonify({"error": f"File path could not be resolved: {file_path}"}), 404
@@ -2411,7 +3182,7 @@ def ai_fix_undo():
         if not file_path:
             return jsonify({"error": "Missing 'file_path' in payload"}), 400
 
-        abs_path = _resolve_absolute_path(file_path)
+        abs_path, _ = _resolve_issue_file_path(None, file_path)
         if not abs_path:
             return jsonify({"error": f"File path could not be resolved: {file_path}"}), 404
 
@@ -2461,15 +3232,15 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=5000, help="Port to run the API server on")
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("Code Audit Librarian — Flask API Server (Stage 6)")
-    print("=" * 60)
-    print(f"Project: {PROJECT_NAME}")
-    print(f"Database: {DB_PATH}")
-    print(f"Base Path: {BASE_PATH}")
-    print("=" * 60)
-    print(f"Starting server on http://localhost:{args.port}")
-    print(f"API endpoints available at http://localhost:{args.port}/api/*")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Code Audit Librarian ? Flask API Server (Stage 6)")
+    logger.info("=" * 60)
+    logger.info(f"Project: {PROJECT_NAME}")
+    logger.info(f"Database: {DB_PATH}")
+    logger.info(f"Base Path: {BASE_PATH}")
+    logger.info("=" * 60)
+    logger.info(f"Starting server on http://localhost:{args.port}")
+    logger.info(f"API endpoints available at http://localhost:{args.port}/api/*")
+    logger.info("=" * 60)
     
     app.run(host="0.0.0.0", port=args.port, debug=False)

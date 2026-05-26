@@ -19,7 +19,7 @@
             </p>
           </div>
         </div>
-        <button @click="$emit('close')" class="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors cursor-pointer">
+        <button @click="$emit('close')" :disabled="isLoading || isApplying || isGenerating" class="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"/>
             <line x1="6" y1="6" x2="18" y2="18"/>
@@ -110,7 +110,7 @@
         <div class="flex gap-3">
           <button 
             @click="$emit('close')" 
-            :disabled="isApplying"
+            :disabled="isLoading || isApplying || isGenerating"
             class="px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-[12px] font-semibold transition cursor-pointer disabled:opacity-50"
           >
             Reject Fix
@@ -118,7 +118,7 @@
           <button 
             v-if="!isLoading && !error"
             @click="applyFix" 
-            :disabled="isApplying"
+            :disabled="isLoading || isApplying || isGenerating"
             class="inline-flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[12px] font-semibold transition shadow-md hover:shadow-indigo-500/10 cursor-pointer disabled:opacity-50"
           >
             <div v-if="isApplying" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -133,6 +133,7 @@
 
 <script setup>
 import { ref, watch, computed } from 'vue'
+import { useIssueActions } from '../composables/useIssueActions.js'
 
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
@@ -144,21 +145,21 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'applied'])
+const { generateAiProposal, commitAiFix, isGenerating, isApplying } = useIssueActions()
 
 const isLoading = ref(false)
-const isApplying = ref(false)
 const error = ref(null)
 
 const warnings = ref([])
 const validationNote = ref('')
 const activeOriginalText = ref('')
 const activeFixedText = ref('')
-const fullOriginalText = ref('')   // Full file content — used for apply endpoint
-const fullFixedText = ref('')     // Full reconstructed file — used for apply endpoint
-const windowStart = ref(null)     // 1-indexed window start line
-const windowEnd = ref(null)       // 1-indexed window end line
+const fullOriginalText = ref('')
+const fullFixedText = ref('')
+const activeResolvedFilePath = ref('')
+const windowStart = ref(null)
+const windowEnd = ref(null)
 
-// Simple dynamic LCS diff alignment logic for premium side-by-side presentation
 const diffData = computed(() => {
   const oldLines = activeOriginalText.value.split(/\r?\n/)
   const newLines = activeFixedText.value.split(/\r?\n/)
@@ -174,23 +175,23 @@ const diffData = computed(() => {
     }
   }
 
-  let left = []
-  let right = []
+  const left = []
+  const right = []
   let i = oldLines.length
   let j = newLines.length
 
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      left.unshift({ type: 'normal', lineNum: i, text: oldLines[i - 1] })
-      right.unshift({ type: 'normal', lineNum: j, text: newLines[j - 1] })
+      left.unshift({ type: 'normal', lineNum: i + (windowStart.value ? windowStart.value - 1 : 0), text: oldLines[i - 1] })
+      right.unshift({ type: 'normal', lineNum: j + (windowStart.value ? windowStart.value - 1 : 0), text: newLines[j - 1] })
       i--
       j--
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
       left.unshift({ type: 'empty', lineNum: '', text: '' })
-      right.unshift({ type: 'added', lineNum: j, text: newLines[j - 1] })
+      right.unshift({ type: 'added', lineNum: j + (windowStart.value ? windowStart.value - 1 : 0), text: newLines[j - 1] })
       j--
     } else {
-      left.unshift({ type: 'removed', lineNum: i, text: oldLines[i - 1] })
+      left.unshift({ type: 'removed', lineNum: i + (windowStart.value ? windowStart.value - 1 : 0), text: oldLines[i - 1] })
       right.unshift({ type: 'empty', lineNum: '', text: '' })
       i--
     }
@@ -200,24 +201,15 @@ const diffData = computed(() => {
 })
 
 const getRowClass = (type) => {
-  if (type === 'removed') {
-    // In Dark: soft red bg with red side-border. In Light: soft amber/red highlights
-    return 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-l-[3px] border-red-500'
-  }
-  if (type === 'added') {
-    // In Dark: soft green bg with green side-border. In Light: pastel green highlights
-    return 'bg-emerald-50 dark:bg-emerald-950/45 text-emerald-700 dark:text-emerald-300 border-l-[3px] border-emerald-500'
-  }
-  if (type === 'empty') {
-    return 'bg-gray-100/30 dark:bg-gray-900/10 text-transparent select-none opacity-40'
-  }
+  if (type === 'removed') return 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-l-[3px] border-red-500'
+  if (type === 'added') return 'bg-emerald-50 dark:bg-emerald-950/45 text-emerald-700 dark:text-emerald-300 border-l-[3px] border-emerald-500'
+  if (type === 'empty') return 'bg-gray-100/30 dark:bg-gray-900/10 text-transparent select-none opacity-40'
   return 'text-gray-800 dark:text-gray-200'
 }
 
 const loadProposal = async () => {
-  if (!props.isOpen || !props.issue) return
-  
-  // Reset states
+  if (!props.isOpen || !props.issue || isLoading.value || isGenerating.value) return
+
   isLoading.value = true
   error.value = null
   warnings.value = []
@@ -228,43 +220,50 @@ const loadProposal = async () => {
   activeFixedText.value = props.fixedText || ''
   fullOriginalText.value = ''
   fullFixedText.value = ''
+  activeResolvedFilePath.value = ''
 
-  // If originalText and fixedText are already supplied as props, bypass the call
   if (activeOriginalText.value && activeFixedText.value) {
     isLoading.value = false
     return
   }
 
   try {
-    const res = await fetch(`http://localhost:5000/api/ai-fix`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        run_id: props.runId,
-        file_path: props.filePath,
-        issue_line: props.issue.line_number || props.issue.lineNumber || 1,
-        issue_type: props.issue.issue_title || props.issue.title || 'Quality Issue',
-        issue_message: props.issue.description || props.issue.message
-      })
+    const data = await generateAiProposal(
+      props.runId,
+      props.filePath,
+      props.issue.line_number || props.issue.lineNumber || 1,
+      props.issue.issue_title || props.issue.title || 'Quality Issue',
+      props.issue.description || props.issue.message,
+      props.issue.code_snippet || '',
+      props.issue.recommendation || ''
+    )
+
+    console.log('[AiFixDiffModal] Backend response:', {
+      has_original: !!data.original_text,
+      has_fixed: !!data.fixed_text,
+      original_len: (data.original_text || '').length,
+      fixed_len: (data.fixed_text || '').length,
+      identical: data.original_text === data.fixed_text,
+      window_start: data.window_start,
+      window_end: data.window_end,
+      syntax_valid: data.syntax_valid,
+      validation_note: data.validation_note
     })
 
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(data.error || 'Server returned an error generating proposal.')
-    }
-
-    // Show only the focus-window slice in the diff pane
     activeOriginalText.value = data.original_text || ''
     activeFixedText.value = data.fixed_text || ''
-    // Store full file texts for the apply route
     fullOriginalText.value = data.full_original_text || data.original_text || ''
     fullFixedText.value = data.full_fixed_content || data.full_fixed_text || data.fixed_text || ''
-    // Window metadata for the UI badge
+    activeResolvedFilePath.value = data.resolved_file_path || data.file_path || props.filePath
     windowStart.value = data.window_start || null
     windowEnd.value = data.window_end || null
     warnings.value = data.warnings || []
     validationNote.value = data.validation_note || 'Syntax check complete'
 
+    // Detect if the AI returned identical code (no actual fix)
+    if (activeOriginalText.value.trim() === activeFixedText.value.trim()) {
+      warnings.value.push('The AI returned code identical to the original. The model may not have understood the fix required. Try re-triggering.')
+    }
   } catch (err) {
     error.value = err.message || 'Could not connect to live Flask backend.'
   } finally {
@@ -273,32 +272,16 @@ const loadProposal = async () => {
 }
 
 const applyFix = async () => {
-  if (!activeFixedText.value) return
-  isApplying.value = true
+  if (!activeFixedText.value || isLoading.value || isApplying.value) return
+
   error.value = null
 
   try {
-    // Use full reconstructed file for apply — NOT the focus-window snippet
-    const contentToWrite = fullFixedText.value || activeFixedText.value
-    const res = await fetch(`http://localhost:5000/api/ai-fix/apply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        file_path: props.filePath,
-        fixed_content: contentToWrite
-      })
-    })
-
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(data.error || 'Server error applying AI proposal.')
-    }
-
-    emit('applied', { backupPath: data.backup_path })
+    const targetFilePath = activeResolvedFilePath.value || props.filePath
+    const data = await commitAiFix(targetFilePath, fullFixedText.value || activeFixedText.value)
+    emit('applied', { backupPath: data.backup_path, filePath: targetFilePath })
   } catch (err) {
     error.value = err.message || 'Connection failure when applying proposed changes.'
-  } finally {
-    isApplying.value = false
   }
 }
 

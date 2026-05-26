@@ -35,7 +35,7 @@
               <button
                 v-if="hasApplied"
                 @click="handleUndoFix"
-                :disabled="isUndoing"
+                :disabled="isActionLocked"
                 class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow transition cursor-pointer disabled:opacity-50 select-none animate-pulse"
               >
                 <span v-if="isUndoing" class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"></span>
@@ -145,7 +145,8 @@
                   :file-path="issue.file_path || issue.filePath || filePath"
                   :line-number="issue.line_number || issue.lineNumber"
                   :issue="issue"
-                  :is-loading-proposal="activeFixIssue && activeFixIssue.id === issue.id && isProposalLoading"
+                  :is-loading-proposal="isIssueProposalLoading(issue)"
+                  :is-disabled="isActionLocked"
                   @trigger-ai-proposal="handleTriggerAiProposal"
                 />
               </div>
@@ -289,10 +290,10 @@
 
 <script setup>
 import { ref, watch, computed } from 'vue'
-import { useRoute } from 'vue-router'
 import { filesAPI } from '../api.js'
 import CodeSnippet from './CodeSnippet.vue'
 import { useVsCode } from '../composables/useVsCode.js'
+import { useIssueActions } from '../composables/useIssueActions.js'
 import IssueActionBar from './IssueActionBar.vue'
 import AiFixDiffModal from './AiFixDiffModal.vue'
 
@@ -300,9 +301,16 @@ const props = defineProps({
   filePath: { type: String, required: true },
   runId: { type: Number, required: false }
 })
-const route = useRoute()
 
 const { jumpToCode } = useVsCode()
+const {
+  isGenerating,
+  isApplying,
+  isUndoing,
+  buildProposalKey,
+  activeProposalKey,
+  rollbackAiFix
+} = useIssueActions()
 
 const loading = ref(false)
 const error = ref(null)
@@ -317,7 +325,7 @@ const activeTab = ref('ai')
 const activeFixIssue = ref(null)
 const isProposalLoading = ref(false)
 const hasApplied = ref(false)
-const isUndoing = ref(false)
+const lastAppliedFilePath = ref('')
 const toastMessage = ref('')
 const toastType = ref('success')
 
@@ -330,12 +338,14 @@ const showToast = (message, type = 'success') => {
 }
 
 const handleTriggerAiProposal = (issue) => {
+  if (isGenerating.value || isApplying.value || isUndoing.value) return
   activeFixIssue.value = issue
   isProposalLoading.value = true
 }
 
 const handleApplied = (data) => {
   hasApplied.value = true
+  lastAppliedFilePath.value = data.filePath || props.filePath
   activeFixIssue.value = null
   isProposalLoading.value = false
   showToast(`Fix applied successfully! Backup saved as ${data.backupPath}.`, 'success')
@@ -348,25 +358,31 @@ const handleClose = () => {
 }
 
 const handleUndoFix = async () => {
-  isUndoing.value = true
+  if (isGenerating.value || isApplying.value || isUndoing.value) return
   try {
-    const res = await fetch(`http://localhost:5000/api/ai-fix/undo`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_path: props.filePath })
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(data.error || 'Server error rolling back changes.')
-    }
+    await rollbackAiFix(lastAppliedFilePath.value || props.filePath)
     hasApplied.value = false
+    lastAppliedFilePath.value = ''
     showToast("Successfully restored pre-fix state from backup.", 'success')
     fetchFileData() // Refresh everything reactively!
   } catch (err) {
     showToast(err.message || 'Failed to rollback the fix.', 'error')
-  } finally {
-    isUndoing.value = false
   }
+}
+
+const isActionLocked = computed(() => isGenerating.value || isApplying.value || isUndoing.value)
+
+const isIssueProposalLoading = (issue) => {
+  if (!isProposalLoading.value || !activeFixIssue.value) return false
+  if (activeFixIssue.value === issue) return true
+  const issueKey = buildProposalKey(
+    props.runId || 0,
+    issue.file_path || issue.filePath || props.filePath,
+    issue.line_number || issue.lineNumber || 1,
+    issue.issue_title || issue.title || 'Quality Issue',
+    issue.description || issue.message || ''
+  )
+  return activeProposalKey.value === issueKey
 }
 
 const fileName = computed(() => props.filePath ? props.filePath.split('/').pop() : '')
@@ -419,6 +435,8 @@ watch(
   () => [props.filePath, props.runId],
   ([newPath, newRun]) => {
     if (newPath && newRun) {
+      hasApplied.value = false
+      lastAppliedFilePath.value = ''
       loadIssuesForFile(newPath, newRun);
     }
   },

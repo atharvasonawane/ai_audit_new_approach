@@ -5,7 +5,8 @@ const props = defineProps({
   filePath: { type: String, required: true },
   lineNumber: { type: Number, default: null },
   issue: { type: Object, required: true },
-  isLoadingProposal: { type: Boolean, default: false }
+  isLoadingProposal: { type: Boolean, default: false },
+  isDisabled: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['trigger-ai-proposal'])
@@ -13,7 +14,7 @@ const emit = defineEmits(['trigger-ai-proposal'])
 const { isVsCode, jumpToCode } = useIssueActions()
 
 const triggerFix = () => {
-  if (props.isLoadingProposal) return
+  if (props.isLoadingProposal || props.isDisabled) return
   emit('trigger-ai-proposal', props.issue)
 }
 </script>
@@ -36,9 +37,9 @@ const triggerFix = () => {
     <!-- AI Fix Button -->
     <button
       @click.stop="triggerFix"
-      :disabled="isLoadingProposal"
+      :disabled="isLoadingProposal || isDisabled"
       class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold font-mono rounded-lg border text-indigo-600 border-indigo-200 bg-indigo-50/50 hover:bg-indigo-50 dark:text-indigo-300 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 transition-all duration-150 select-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-      :title="isLoadingProposal ? 'Fix request in progress...' : 'Ask AI to generate architectural fix proposal'"
+      :title="isLoadingProposal ? 'Fix request in progress...' : isDisabled ? 'Another AI fix action is already running...' : 'Ask AI to generate architectural fix proposal'"
     >
       <!-- Loading spinner -->
       <svg v-if="isLoadingProposal" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
