@@ -537,13 +537,13 @@ def _validate_and_write_issues_for_file(
 
     with _db_connect(db_path) as conn:
         row = conn.execute(
-            "SELECT id, file_path FROM vue_files WHERE project_name = ? AND file_path = ?",
-            (project_name, normalized_path),
+            "SELECT id, file_path FROM vue_files WHERE run_id = ? AND project_name = ? AND file_path = ?",
+            (run_id, project_name, normalized_path),
         ).fetchone()
         if not row and file_path != normalized_path:
             row = conn.execute(
-                "SELECT id, file_path FROM vue_files WHERE project_name = ? AND file_path = ?",
-                (project_name, file_path),
+                "SELECT id, file_path FROM vue_files WHERE run_id = ? AND project_name = ? AND file_path = ?",
+                (run_id, project_name, file_path),
             ).fetchone()
         if row:
             vue_file_id = row["id"]
@@ -606,6 +606,14 @@ def _validate_and_write_issues_for_file(
         }
 
         results.append(record)
+
+    # Purge old/copied AI issues for this file in the current run before writing new ones
+    with _db_connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM ai_issues WHERE run_id = ? AND vue_file_id = ?",
+            (run_id, vue_file_id),
+        )
+        conn.commit()
 
     insert_ai_issues_bulk(run_id, results, db_path=db_path)
 

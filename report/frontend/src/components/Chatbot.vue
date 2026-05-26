@@ -378,7 +378,8 @@ const submitMessage = async () => {
       content: m.content
     }))
 
-    const response = await fetch('http://localhost:5000/api/chat', {
+    const port = window.__FLASK_PORT__ || 5000
+    const response = await fetch(`http://localhost:${port}/api/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
