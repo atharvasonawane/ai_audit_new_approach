@@ -1,4 +1,4 @@
-base_path: C:\Users\Atharvaso\Desktop\StudentManagement\StudentManagement
+base_path: C:\Users\Atharvaso\Desktop\PortalManagement
 db:
   path: audit_history.db
 generic_api:
@@ -11,7 +11,7 @@ module: null
 mql:
   confidence: HIGH
   pattern: \w+\.\[(\w+)\]
-project_name: StudentManagement
+project_name: PortalManagement
 spelling:
   ignore_words:
   - DU

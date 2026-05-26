@@ -1982,6 +1982,443 @@ def health_check():
     })
 
 
+def _sanitize_llm_code(text: str) -> str:
+    # Match ```[lang] <content> ```
+    match = re.search(r"```[a-zA-Z0-9_-]*\s*\n(.*?)\n\s*```", text, re.DOTALL)
+    if match:
+        return match.group(1)
+    
+    # Try match ``` without a newline immediately after
+    match = re.search(r"```[a-zA-Z0-9_-]*\s*(.*?)\s*```", text, re.DOTALL)
+    if match:
+        return match.group(1)
+        
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", text)
+    if text.endswith("```"):
+        text = re.sub(r"\s*```$", "", text)
+        
+    return text.strip()
+
+
+def _validate_syntax(file_path: str, code_content: str) -> tuple[bool, str]:
+    suffix = Path(file_path).suffix.lower()
+    
+    try:
+        from tree_sitter import Parser
+        from tree_sitter_language_pack import get_language
+        
+        lang_name = 'vue' if suffix == '.vue' else ('javascript' if suffix in ['.js', '.jsx'] else 'typescript' if suffix in ['.ts', '.tsx'] else None)
+        if not lang_name:
+            raise ValueError(f"Unsupported suffix for tree-sitter: {suffix}")
+            
+        lang = get_language(lang_name)
+        parser = Parser(lang)
+        tree = parser.parse(code_content.encode("utf-8"))
+        
+        if tree.root_node is None:
+            return False, "Parser produced None root node"
+            
+        if tree.root_node.type == "ERROR":
+            return False, f"Catastrophic parsing error at root: tree-sitter {lang_name}"
+            
+        # Vue tag-balance safeguard (even if tree-sitter parses successfully)
+        if suffix == '.vue':
+            tags = ['template', 'script', 'style']
+            for tag in tags:
+                open_tag = f"<{tag}"
+                close_tag = f"</{tag}>"
+                open_count = code_content.lower().count(open_tag)
+                close_count = code_content.lower().count(close_tag)
+                if open_count != close_count:
+                    return False, f"Mismatched tag counts for <{tag}>: {open_count} open vs {close_count} close"
+        elif suffix in ['.js', '.jsx', '.ts', '.tsx']:
+            if tree.root_node.has_error:
+                return False, f"Syntax errors detected in tree-sitter {lang_name} AST"
+            
+        return True, f"Syntax validated via Tree-sitter ({lang_name})"
+        
+    except (ImportError, Exception) as e:
+        logger.warning(f"Tree-sitter unavailable or failed; falling back to lightweight syntax check: {e}")
+        
+        if suffix == '.vue':
+            tags = ['template', 'script', 'style']
+            for tag in tags:
+                open_tag = f"<{tag}"
+                close_tag = f"</{tag}>"
+                open_count = code_content.lower().count(open_tag)
+                close_count = code_content.lower().count(close_tag)
+                if open_count != close_count:
+                    return False, f"Mismatched tag counts for <{tag}>: {open_count} open vs {close_count} close"
+            return True, "Syntax validated via lightweight layout checker (Vue tags balanced)"
+        else:
+            braces = 0
+            parens = 0
+            brackets = 0
+            for char in code_content:
+                if char == '{': braces += 1
+                elif char == '}': braces -= 1
+                elif char == '(': parens += 1
+                elif char == ')': parens -= 1
+                elif char == '[': brackets += 1
+                elif char == ']': brackets -= 1
+                
+                if braces < 0 or parens < 0 or brackets < 0:
+                    return False, "Unbalanced braces, parentheses, or brackets detected early"
+            
+            if braces != 0 or parens != 0 or brackets != 0:
+                return False, f"Unbalanced braces ({braces}), parentheses ({parens}), or brackets ({brackets})"
+                
+            return True, "Syntax validated via lightweight layout checker (braces/brackets balanced)"
+
+
+@app.route("/api/ai-fix", methods=["POST"])
+def ai_fix():
+    """
+    POST /api/ai-fix
+    Surgically designs and returns proposed AI fixes for code issues.
+    """
+    try:
+        import difflib
+        data = request.get_json(silent=True)
+        if not data:
+            logger.error("AI Fix API called with empty or invalid JSON payload.")
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        run_id = data.get("run_id")
+        file_path = data.get("file_path")
+        issue_line = data.get("issue_line")
+        issue_type = data.get("issue_type", "Quality Issue")
+        issue_message = data.get("issue_message")
+
+        if not file_path or issue_line is None or not issue_message:
+            logger.error("AI Fix API missing required fields in payload.")
+            return jsonify({"error": "Missing required fields 'file_path', 'issue_line', or 'issue_message'"}), 400
+
+        try:
+            issue_line = int(issue_line)
+        except ValueError:
+            logger.error(f"AI Fix API received invalid non-integer issue_line: {issue_line}")
+            return jsonify({"error": "issue_line must be an integer"}), 400
+
+        abs_path = _resolve_absolute_path(file_path)
+        if not abs_path or not abs_path.exists():
+            logger.error(f"File not found on disk: {file_path}")
+            return jsonify({"error": f"File not found: {file_path}"}), 404
+
+        # Read the file
+        try:
+            with open(abs_path, "r", encoding="utf-8") as f:
+                original_text = f.read()
+        except Exception as e:
+            logger.error(f"Failed to read file {file_path}: {e}")
+            return jsonify({"error": f"Failed to read target file: {str(e)}"}), 500
+
+        original_lines = original_text.splitlines()
+        total_lines = len(original_lines)
+
+        # Normalize file_path to be relative to the project workspace root
+        normalized_file_path = file_path
+        try:
+            normalized_file_path = abs_path.relative_to(PROJECT_ROOT).as_posix()
+        except Exception:
+            normalized_file_path = file_path.replace("\\", "/")
+
+        # Step B: Apply context window slicing for large files
+        issue_line_0 = max(0, issue_line - 1)
+        if total_lines > 500:
+            window_start = max(0, issue_line_0 - 50)
+            window_end = min(total_lines, issue_line_0 + 200)
+            focus_lines = original_lines[window_start:window_end]
+        else:
+            window_start = 0
+            window_end = total_lines
+            focus_lines = original_lines
+
+        focus_window_text = "\n".join(focus_lines)
+
+        # Step C: Assemble system prompt
+        system_prompt = (
+            "You are an expert Vue/JavaScript developer specializing in code quality and bug fixing.\n"
+            f"Your task is to fix a specific issue in a given focus window of the file '{normalized_file_path}'.\n\n"
+            f"Issue Type: {issue_type}\n"
+            f"Issue Description/Message: {issue_message}\n"
+            f"Highlighted Issue Line (1-indexed relative to full file): {issue_line}\n"
+            f"This focus window starts at line {window_start + 1} and ends at line {window_end} of the original file.\n\n"
+            "Below is the exact code within this focus window:\n"
+            "--- FOCUS WINDOW START ---\n"
+            f"{focus_window_text}\n"
+            "--- FOCUS WINDOW END ---\n\n"
+            "STRICT INSTRUCTIONS:\n"
+            "1. Modify ONLY the minimum lines required to fix the specified issue.\n"
+            "2. All other lines in the focus window MUST remain completely unchanged.\n"
+            "3. Do NOT add new external dependencies, and do NOT change unrelated logic.\n"
+            "4. Return ONLY the clean, fixed code block for the focus window. Do NOT include markdown formatting fences (such as ```vue, ```javascript, etc.), explanation text, preambles, or postscripts. The response should be raw, drop-in replacement code for the focus window."
+        )
+
+        user_content = (
+            f"Analyze and fix the code inside the focus window to resolve the issue: '{issue_message}'. "
+            "Output only the raw replacement code block for the focus window."
+        )
+
+        # Step D: Make outbound HTTP request using standard library urllib
+        _load_env_file()
+        raw_base_url = os.getenv("OPENWEBUI_BASE_URL", "")
+        api_key = os.getenv("OPENWEBUI_API_KEY", "")
+        model = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+        timeout_val = os.getenv("LLM_TIMEOUT_SECONDS", "120")
+
+        try:
+            timeout = int(timeout_val)
+        except ValueError:
+            timeout = 120
+
+        if not raw_base_url:
+            logger.error("OPENWEBUI_BASE_URL is not configured in the environment.")
+            return jsonify({"error": "OPENWEBUI_BASE_URL environment variable is not configured"}), 500
+
+        resolved_base_url = _resolve_base_url(raw_base_url)
+        url = f"{resolved_base_url}/chat/completions"
+
+        post_data = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            "temperature": 0.1
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        logger.info(f"Dispatching AI Fix request to URL: {url} with model: {model}")
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(post_data).encode("utf-8"),
+            headers=headers,
+            method="POST"
+        )
+
+        try:
+            response = urllib.request.urlopen(req, timeout=timeout)
+            res_bytes = response.read()
+            res_json = json.loads(res_bytes.decode("utf-8"))
+            choices = res_json.get("choices", [])
+            if not choices:
+                logger.error(f"LLM response lacks choices: {res_json}")
+                return jsonify({"error": "Invalid response from LLM"}), 500
+            llm_content = choices[0].get("message", {}).get("content", "")
+        except urllib.error.HTTPError as e:
+            err_body = ""
+            try:
+                err_body = e.read().decode("utf-8")
+            except Exception:
+                pass
+            logger.error(f"HTTPError connecting to LLM endpoint: Status {e.code} - {e.reason} - Body: {err_body}")
+            return jsonify({"error": f"LLM API HTTP Error: {e.code} - {e.reason}"}), 500
+        except Exception as e:
+            logger.exception(f"Unexpected connection failure in LLM call: {e}")
+            return jsonify({"error": f"Unexpected LLM call failure: {str(e)}"}), 500
+
+        # Step E: Sanitize response
+        llm_fixed_code = _sanitize_llm_code(llm_content)
+        llm_lines = llm_fixed_code.splitlines()
+
+        # Step F: Reconstruct the full file
+        fixed_lines = original_lines[0:window_start] + llm_lines + original_lines[window_end:]
+        fixed_text = "\n".join(fixed_lines)
+        if original_text.endswith("\n") and not fixed_text.endswith("\n"):
+            fixed_text += "\n"
+
+        # Check line count limit safeguard
+        diff_lines = list(difflib.unified_diff(original_lines, fixed_lines, lineterm=''))
+        diff_added = sum(1 for l in diff_lines if l.startswith('+') and not l.startswith('+++'))
+        diff_removed = sum(1 for l in diff_lines if l.startswith('-') and not l.startswith('---'))
+
+        if diff_added > 20 or diff_removed > 20:
+            logger.warning(f"AI Fix too broad for '{file_path}': added={diff_added}, removed={diff_removed} (max limit is 20 lines added/removed).")
+            return jsonify({"error": f"AI Fix proposed too many changes (added {diff_added}, removed {diff_removed} lines, limit is 20)."}), 422
+
+        # Step G: Compute Diffs and Validate
+        syntax_valid, validation_note = _validate_syntax(normalized_file_path, fixed_text)
+
+        # Import path validation
+        warnings = []
+        for line in fixed_lines:
+            match = re.search(r'from\s+[\'"]([^\'"]+)[\'"]', line)
+            if not match:
+                match = re.search(r'import\s+[\'"]([^\'"]+)[\'"]', line)
+            if match:
+                imp_path = match.group(1)
+                if imp_path.startswith(('.', '@')):
+                    resolved_imp = None
+                    file_dir = abs_path.parent
+                    if imp_path.startswith('@/'):
+                        resolved_imp = PROJECT_ROOT / 'report' / 'frontend' / 'src' / imp_path[2:]
+                        if not resolved_imp.exists():
+                            resolved_imp = PROJECT_ROOT / 'src' / imp_path[2:]
+                    else:
+                        resolved_imp = (file_dir / imp_path).resolve()
+                    
+                    if resolved_imp:
+                        exists = False
+                        for ext in ['', '.vue', '.js', '.ts', '/index.js', '/index.ts', '/index.vue']:
+                            p = Path(str(resolved_imp) + ext)
+                            if p.exists():
+                                exists = True
+                                break
+                        if not exists:
+                            warn_msg = f"Potential broken import path: '{imp_path}' in {file_path}"
+                            warnings.append(warn_msg)
+                            logger.warning(warn_msg)
+
+        logger.info(f"AI Fix generated successfully for {file_path}. Syntax status: {syntax_valid} ({validation_note})")
+        return jsonify({
+            "original_text": original_text,
+            "fixed_text": fixed_text,
+            "syntax_valid": syntax_valid,
+            "validation_note": validation_note,
+            "warnings": warnings,
+            "diff": "\n".join(diff_lines)
+        }), 200
+
+    except Exception as e:
+        logger.exception("Unexpected error inside /api/ai-fix route:")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ai-fix/apply", methods=["POST"])
+def ai_fix_apply():
+    """
+    POST /api/ai-fix/apply
+    Surgically writes the approved fixed_content to active file path,
+    retaining a single .audit-backup rollback option on disk.
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            logger.error("AI Fix Apply called with invalid JSON.")
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        file_path = data.get("file_path")
+        fixed_content = data.get("fixed_content")
+
+        if not file_path or fixed_content is None:
+            logger.error("AI Fix Apply missing 'file_path' or 'fixed_content'.")
+            return jsonify({"error": "Missing required 'file_path' or 'fixed_content'"}), 400
+
+        abs_path = _resolve_absolute_path(file_path)
+        if not abs_path:
+            logger.error(f"Unable to resolve file path for apply: {file_path}")
+            return jsonify({"error": f"File path could not be resolved: {file_path}"}), 404
+
+        # Read current content to ensure it exists
+        try:
+            with open(abs_path, "r", encoding="utf-8") as f:
+                current_content = f.read()
+        except Exception as e:
+            logger.error(f"Unable to read file before backup for apply: {file_path} - {e}")
+            return jsonify({"error": f"Unable to read file before backup: {str(e)}"}), 500
+
+        # Step A: Copy exact current contents to backup file
+        backup_path = abs_path.with_suffix(abs_path.suffix + ".audit-backup")
+        try:
+            with open(backup_path, "w", encoding="utf-8") as f:
+                f.write(current_content)
+        except Exception as e:
+            logger.error(f"Failed to write audit-backup for {file_path}: {e}")
+            return jsonify({"error": f"Failed to create file backup: {str(e)}"}), 500
+
+        # Step B: Write the fixed_content surgically to active path
+        try:
+            with open(abs_path, "w", encoding="utf-8") as f:
+                f.write(fixed_content)
+        except Exception as e:
+            logger.error(f"Failed to write fixed content to {file_path}: {e}")
+            # Try to restore backup
+            try:
+                with open(abs_path, "w", encoding="utf-8") as f:
+                    f.write(current_content)
+                logger.info(f"Successfully restored original content to {file_path} after write failure.")
+            except Exception as restore_err:
+                logger.error(f"CRITICAL: Failed to restore original content to {file_path} after write failure: {restore_err}")
+            return jsonify({"error": f"Failed to write fixed content to active file: {str(e)}"}), 500
+
+        logger.info(f"Successfully applied AI fix to file: {file_path}. Backup stored at: {backup_path.name}")
+        return jsonify({
+            "success": True,
+            "message": f"Successfully applied AI fix to {file_path}.",
+            "backup_path": backup_path.name
+        }), 200
+
+    except Exception as e:
+        logger.exception("Unexpected error inside /api/ai-fix/apply route:")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ai-fix/undo", methods=["POST"])
+def ai_fix_undo():
+    """
+    POST /api/ai-fix/undo
+    Restores the original file contents from the active .audit-backup file.
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        file_path = data.get("file_path")
+        if not file_path:
+            return jsonify({"error": "Missing 'file_path' in payload"}), 400
+
+        abs_path = _resolve_absolute_path(file_path)
+        if not abs_path:
+            return jsonify({"error": f"File path could not be resolved: {file_path}"}), 404
+
+        backup_path = abs_path.with_suffix(abs_path.suffix + ".audit-backup")
+        if not backup_path.exists():
+            logger.warning(f"Undo requested for {file_path} but no backup file exists.")
+            return jsonify({"error": "No backup file found for this file. Undo not possible."}), 404
+
+        # Read backup content
+        try:
+            with open(backup_path, "r", encoding="utf-8") as f:
+                backup_content = f.read()
+        except Exception as e:
+            logger.error(f"Failed to read backup file {backup_path}: {e}")
+            return jsonify({"error": f"Failed to read backup file: {str(e)}"}), 500
+
+        # Write original content back
+        try:
+            with open(abs_path, "w", encoding="utf-8") as f:
+                f.write(backup_content)
+        except Exception as e:
+            logger.error(f"Failed to write backup content to {abs_path}: {e}")
+            return jsonify({"error": f"Failed to restore original file content: {str(e)}"}), 500
+
+        # Delete backup
+        try:
+            os.remove(backup_path)
+        except Exception as e:
+            logger.warning(f"Failed to delete backup file {backup_path} after successful restore: {e}")
+
+        logger.info(f"Successfully rolled back and removed backup for: {file_path}")
+        return jsonify({
+            "success": True,
+            "message": f"Successfully restored {file_path} from backup."
+        }), 200
+
+    except Exception as e:
+        logger.exception("Unexpected error inside /api/ai-fix/undo route:")
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     # Defensively clear out any incomplete in_progress runs from previous crashes on startup
     _cleanup_in_progress_runs()
