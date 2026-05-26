@@ -228,29 +228,34 @@ def _resolve_absolute_path(file_path: str) -> Optional[Path]:
     """
     # Normalize slashes
     file_path = file_path.replace("\\", "/")
+    # Remove leading slashes and ../ transitions
+    normalized = file_path.lstrip("/")
+    while normalized.startswith("../"):
+        normalized = normalized[3:]
     
     candidates = []
     
     # 1. Try absolute path directly
     candidates.append(Path(file_path))
+    candidates.append(Path(normalized))
     
     # 2. Try relative to current BASE_PATH
     if BASE_PATH:
         base = Path(BASE_PATH)
-        candidates.append(base / file_path)
-        candidates.append(base.parent / file_path)
-        candidates.append(base.parent.parent / file_path)
+        candidates.append(base / normalized)
+        candidates.append(base.parent / normalized)
+        candidates.append(base.parent.parent / normalized)
         
     # 3. Try relative to PROJECT_ROOT and its parent (Desktop)
     if PROJECT_ROOT:
-        candidates.append(PROJECT_ROOT / file_path)
+        candidates.append(PROJECT_ROOT / normalized)
         desktop = PROJECT_ROOT.parent
-        candidates.append(desktop / file_path)
+        candidates.append(desktop / normalized)
         
         # Try appending starting directory segment to the desktop base path
-        parts = Path(file_path).parts
+        parts = Path(normalized).parts
         if parts:
-            candidates.append(desktop / parts[0] / file_path)
+            candidates.append(desktop / parts[0] / normalized)
             
     # Check all candidates
     for p in candidates:
@@ -259,6 +264,58 @@ def _resolve_absolute_path(file_path: str) -> Optional[Path]:
                 return p.resolve()
         except Exception:
             continue
+            
+    # 4. Walk Desktop/PROJECT_ROOT.parent defensively to resolve collisions
+    if PROJECT_ROOT:
+        desktop = PROJECT_ROOT.parent
+        base_name = os.path.basename(normalized)
+        candidates_found = []
+        try:
+            # Walk up to a certain depth to keep it extremely fast
+            max_depth = 4
+            desktop_str = str(desktop)
+            desktop_depth = desktop_str.count(os.sep)
+            
+            for root, dirs, files in os.walk(desktop_str):
+                # Prune noisy directories to keep walk lightning fast
+                dirs[:] = [d for d in dirs if d.lower() not in (
+                    'node_modules', 'venv', '.git', '.gemini', 'dist', 'out', 'build', 'not_important', '__pycache__'
+                )]
+                
+                # Enforce max depth constraint
+                current_depth = root.count(os.sep) - desktop_depth
+                if current_depth > max_depth:
+                    dirs[:] = []  # stop walking deeper in this branch
+                    continue
+                    
+                if base_name in files:
+                    full_walk_path = Path(root) / base_name
+                    # Verify the tail of the walk path matches the relative file_path
+                    walk_posix = str(full_walk_path).replace("\\", "/")
+                    if walk_posix.endswith(normalized):
+                        # Calculate score
+                        score = 0
+                        # Check if any path segments contain the active PROJECT_NAME
+                        path_parts_lower = [p.lower() for p in full_walk_path.parts]
+                        if PROJECT_NAME.lower() in path_parts_lower:
+                            score += 100
+                        # Also check if it's in the PROJECT_ROOT directory
+                        if str(PROJECT_ROOT).lower() in str(full_walk_path).lower():
+                            score += 50
+                        candidates_found.append((score, full_walk_path))
+        except Exception as walk_err:
+            logger.warning(f"[PATH RESOLUTION] Walk fallback failed: {walk_err}")
+            
+        if candidates_found:
+            # Sort by score desc, then by path length asc (shorter path means closer match)
+            candidates_found.sort(key=lambda x: (-x[0], len(str(x[1]))))
+            best_match = candidates_found[0][1]
+            try:
+                if best_match.exists() and best_match.is_file():
+                    logger.info(f"[PATH RESOLUTION] Walk fallback resolved '{file_path}' to '{best_match}' (score: {candidates_found[0][0]})")
+                    return best_match.resolve()
+            except Exception:
+                pass
             
     return None
 
@@ -2091,70 +2148,15 @@ def ai_fix_endpoint():
         logger.info(f"[AI FIX] Processing fix request for path: {incoming_path} at line {issue_line}")
 
         # ─── 1. SAFE PATH HEALING ENGINE ───────────────────────────────
-        # Normalize cross-platform slashes and strip rogue parent dir patterns
-        normalized_incoming = incoming_path.replace("\\", "/").lstrip("/")
-        # Remove any leading ../ traversal attempts
-        while normalized_incoming.startswith("../"):
-            normalized_incoming = normalized_incoming[3:]
-
-        target_path = None
-
-        # Phase A: Direct candidate lookup matrix
-        workspace_root = str(BASE_PATH) if BASE_PATH else str(PROJECT_ROOT)
-        candidate_paths = [
-            normalized_incoming,
-            os.path.abspath(normalized_incoming),
-            os.path.join(os.getcwd(), normalized_incoming),
-            os.path.join(os.getcwd(), 'report', normalized_incoming),
-            os.path.join(workspace_root, normalized_incoming),
-            os.path.abspath(os.path.join(workspace_root, normalized_incoming)),
-        ]
-
-        # Also try with the original incoming_path in case it was already absolute
-        if os.path.isabs(incoming_path):
-            candidate_paths.insert(0, incoming_path)
-
-        for cp in candidate_paths:
-            try:
-                # Normalize the candidate to resolve mixed slashes on Windows
-                cp_normalized = os.path.normpath(cp)
-                if os.path.exists(cp_normalized) and os.path.isfile(cp_normalized):
-                    target_path = cp_normalized
-                    break
-            except (OSError, ValueError):
-                continue
-
-        # Phase B: Structural deep walk search across workspace roots
-        if not target_path:
-            base_name = os.path.basename(normalized_incoming)
-            walk_roots = []
-            if BASE_PATH and os.path.isdir(str(BASE_PATH)):
-                walk_roots.append(str(BASE_PATH))
-            if str(PROJECT_ROOT) not in walk_roots and os.path.isdir(str(PROJECT_ROOT)):
-                walk_roots.append(str(PROJECT_ROOT))
-
-            for walk_root in walk_roots:
-                if target_path:
-                    break
-                try:
-                    for root, dirs, files in os.walk(walk_root):
-                        if base_name in files:
-                            full_walk_path = os.path.normpath(os.path.join(root, base_name))
-                            # Verify the tail of the walk path matches the incoming relative path
-                            walk_posix = full_walk_path.replace("\\", "/")
-                            if walk_posix.endswith(normalized_incoming) or normalized_incoming in walk_posix:
-                                target_path = full_walk_path
-                                break
-                except (OSError, PermissionError) as walk_err:
-                    logger.warning(f"[AI FIX] Walk search skipped root '{walk_root}': {walk_err}")
-
-        if not target_path or not os.path.exists(target_path):
+        target_path_obj = _resolve_absolute_path(incoming_path)
+        if not target_path_obj:
             logger.error(
                 f"[AI FIX] Resolution failed. File path completely absent from disk layout: "
-                f"{incoming_path} (normalized: {normalized_incoming}, workspace: {workspace_root})"
+                f"{incoming_path} (workspace: {BASE_PATH or PROJECT_ROOT})"
             )
             return jsonify({"error": f"Physical source file not found on disk layout: {incoming_path}"}), 400
 
+        target_path = str(target_path_obj)
         logger.info(f"[AI FIX] Path resolved successfully: {incoming_path} -> {target_path}")
 
         # ─── 2. INGEST GROUND TRUTH SNAPSHOT FROM DISK ─────────────────
