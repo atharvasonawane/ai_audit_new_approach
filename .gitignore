@@ -2,6 +2,12 @@
 # Code Audit Librarian — Git Isolation Configuration
 # =============================================================================
 
+# IDE internal folders & temporary agent logs
+.gemini/
+.gemini
+.vscode/
+.idea/
+
 # Python Virtual Environments & compiled files
 venv/
 .venv/
@@ -28,6 +34,10 @@ out/
 *.db-journal
 *.db-shm
 *.db-wal
+
+# Logging output
+*.log
+scan.log
 
 # Environment files & secrets
 .env
