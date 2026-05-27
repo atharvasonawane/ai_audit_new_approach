@@ -216,6 +216,15 @@ if not Path(BASE_PATH).exists():
     logger.error("base_path '%s' does not exist. Check project_config.yaml.", BASE_PATH)
     sys.exit(1)
 
+
+db_path_str = cfg.get("db", {}).get("path")
+if db_path_str:
+    SQLITE_PATH = Path(db_path_str)
+    if not SQLITE_PATH.is_absolute():
+        SQLITE_PATH = PROJECT_ROOT / SQLITE_PATH
+else:
+    SQLITE_PATH = PROJECT_ROOT / "audit_history.db"
+
 # ── Imports ───────────────────────────────────────────────────────────────────
 from extractors.orchestrator import scan_all_vue_files
 from db.db_init import init_db
@@ -232,7 +241,7 @@ from graph.graph_exporter import export_graph
 def _run_scout_phase(run_id: int):
     logger.info("")
     logger.info("=" * 65)
-    sqlite_path = Path(cfg.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db"))
+    sqlite_path = SQLITE_PATH
 
     logger.info("  Code Audit Librarian — Full Project Scan")
     logger.info(f"  Source : {BASE_PATH}")
@@ -362,7 +371,7 @@ def _run_graph_phase(run_id: int):
     logger.info("=" * 65)
     logger.info("  Phase 1.5: Dependency Graph")
     logger.info("=" * 65)
-    sqlite_path = str(Path(cfg.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db")))
+    sqlite_path = str(SQLITE_PATH)
     frontend_dir = str(PROJECT_ROOT / "report" / "frontend" / "public")
 
     logger.info("Running import extraction...")
@@ -498,7 +507,7 @@ def main():
         run_report = not args.no_report
 
     if run_scout or run_graph or run_ai:
-        sqlite_path = Path(cfg.get("db", {}).get("path", PROJECT_ROOT / "audit_history.db"))
+        sqlite_path = SQLITE_PATH
         init_db(sqlite_path)
         
         # Resume logic

@@ -12,8 +12,8 @@ export function activate(context: vscode.ExtensionContext) {
 
         const workspaceFolders = vscode.workspace.workspaceFolders;
 
-        // Absolute path to the project root — normalized so backslashes are single on Windows
-        const rootPath = path.normalize("C:\\Users\\Atharvaso\\Desktop\\final_approach_main");
+        // Absolute path to the project root — resolved dynamically relative to context
+        const rootPath = path.resolve(context.extensionPath, '..');
 
         const workspacePath = workspaceFolders && workspaceFolders.length > 0
             ? workspaceFolders[0].uri.fsPath

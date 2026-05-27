@@ -57,6 +57,17 @@ def _load_config() -> Dict[str, Any]:
     return {}
 
 
+def _get_sqlite_path() -> Path:
+    cfg = _load_config()
+    db_path_str = cfg.get("db", {}).get("path")
+    if db_path_str:
+        p = Path(db_path_str)
+        if not p.is_absolute():
+            return PROJECT_ROOT / p
+        return p
+    return DEFAULT_DB_PATH
+
+
 def _normalize_path(file_path: str, base_path: str) -> str:
     if base_path:
         try:
@@ -97,13 +108,6 @@ def _clean_json_string(raw: str) -> str:
 def _extract_json_array(text: str) -> List[Dict[str, Any]]:
     """
     Extract JSON array from text, handling padding/conversational content.
-
-    Strategy:
-    1. Try direct parse on cleaned text
-    2. Find first [ and last ] in cleaned text
-    3. Extract block between them
-    4. Parse that block
-    5. If all fails, print first 200 chars for debugging
     """
     clean_text = _clean_json_string(text)
 
@@ -112,6 +116,9 @@ def _extract_json_array(text: str) -> List[Dict[str, Any]]:
         data = json.loads(clean_text)
         if isinstance(data, list):
             return data
+        if isinstance(data, dict) and "issues" in data:
+            if isinstance(data["issues"], list):
+                return data["issues"]
     except json.JSONDecodeError:
         pass
 
@@ -119,26 +126,32 @@ def _extract_json_array(text: str) -> List[Dict[str, Any]]:
     start_idx = clean_text.find("[")
     end_idx = clean_text.rfind("]")
 
-    if start_idx < 0 or end_idx < 0 or end_idx <= start_idx:
-        print(
-            f"ERROR: Could not find JSON array brackets. First 200 chars of raw_content:\n{clean_text[:200]}"
-        )
-        raise ValueError("LLM output is not a JSON array")
+    if start_idx >= 0 and end_idx >= 0 and end_idx > start_idx:
+        json_str = clean_text[start_idx : end_idx + 1]
+        try:
+            data = json.loads(json_str)
+            if isinstance(data, list):
+                return data
+        except json.JSONDecodeError:
+            pass
 
-    # Extract the block from first [ to last ]
-    json_str = clean_text[start_idx : end_idx + 1]
+    # Also try to find first { and last } in case it returned a JSON object
+    start_obj = clean_text.find("{")
+    end_obj = clean_text.rfind("}")
+    if start_obj >= 0 and end_obj >= 0 and end_obj > start_obj:
+        json_str = clean_text[start_obj : end_obj + 1]
+        try:
+            data = json.loads(json_str)
+            if isinstance(data, dict) and "issues" in data:
+                if isinstance(data["issues"], list):
+                    return data["issues"]
+        except json.JSONDecodeError:
+            pass
 
-    try:
-        data = json.loads(json_str)
-        if isinstance(data, list):
-            return data
-    except json.JSONDecodeError as exc:
-        print(
-            f"ERROR: Failed to parse extracted JSON block. First 200 chars of raw_content:\n{clean_text[:200]}"
-        )
-        raise ValueError(f"LLM output is not a JSON array: {exc}") from exc
-
-    raise ValueError("LLM output is not a JSON array")
+    print(
+        f"ERROR: Could not parse JSON output. First 200 chars of raw_content:\n{clean_text[:200]}"
+    )
+    raise ValueError("LLM output is not a JSON array or object with issues")
 
 
 def _normalize_issue(issue: Any) -> Dict[str, Any]:
@@ -409,8 +422,7 @@ async def generate_executive_synthesis(run_id: int, project_name: str) -> None:
     Phase 3 — Executive synthesis: macro context from SQLite, one LLM call (plain text),
     persist to audit_runs.synthesis_text and mark run completed.
     """
-    cfg = _load_config()
-    db_path = Path(cfg.get("db", {}).get("path", DEFAULT_DB_PATH))
+    db_path = _get_sqlite_path()
     ctx = _fetch_executive_synthesis_context(db_path, project_name)
     if ctx["total_files"] == 0:
         _finalize_audit_run_with_synthesis(
@@ -499,7 +511,7 @@ def _fetch_vue_files_with_script_lines(
             """
             SELECT file_path, COALESCE(script_lines, 0) AS script_lines
             FROM vue_files
-            WHERE project_name = ?
+            WHERE project_name = ? AND file_path LIKE '%.vue'
             ORDER BY file_path
             """,
             (project_name,),
@@ -906,17 +918,17 @@ async def _run_prompt_only(
 
     system_prompt = (
         "You are a JSON generator. You output ONLY valid JSON. No other text. "
-        "When given code and context, you extract issues and return them as a JSON array. "
+        "When given code and context, you extract issues and return them as a JSON object with an 'issues' key containing a JSON array. "
         "EXACT REQUIRED FORMAT: "
-        '[{"issue_category":"string","title":"string","description":"string","severity":"High|Medium|Low","line_number":number,"recommendation":"string"},...] '
-        "Field names MUST be: issue_category, title, description, severity, line_number, recommendation. "
-        "If no issues found: return [] "
+        '{"issues": [{"issue_category":"string","title":"string","description":"string","severity":"High|Medium|Low","line_number":number,"recommendation":"string"},...]} '
+        "Field names in each issue MUST be: issue_category, title, description, severity, line_number, recommendation. "
+        "If no issues found: return {\"issues\": []} "
         "DO NOT EXPLAIN. DO NOT ADD PROSE. ONLY JSON."
     )
 
     user_prompt = (
         "CODE AND CONTEXT (JSON):\n" + json.dumps(context, ensure_ascii=True) + "\n\n"
-        "Return ONLY a JSON array of issues. No other text."
+        "Return ONLY a JSON object with key 'issues' containing an array of issues. No other text."
     )
     if prompt_suffix:
         user_prompt += prompt_suffix
@@ -929,6 +941,7 @@ async def _run_prompt_only(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.1,
+            response_format={"type": "json_object"},
         )
     except Exception as exc:
         raise RuntimeError(f"LLM request failed: {exc}") from exc
@@ -986,17 +999,17 @@ async def _run_batch_prompt_only(
 
     system_prompt = (
         "You are a JSON generator. You output ONLY valid JSON. No other text. "
-        "You analyze multiple Vue files at once. Return a SINGLE JSON array combining issues from ALL files. "
-        "Each object MUST include file_path (exactly matching one of the input file_path values) plus: "
+        "You analyze multiple Vue files at once. Return a SINGLE JSON object with an 'issues' key containing a combined array of issues from ALL files. "
+        "Each issue object MUST include file_path (exactly matching one of the input file_path values) plus: "
         "issue_category, title, description, severity (High|Medium|Low), line_number, recommendation. "
         "If a file has no issues, omit any entries for that file (or none) — the array may be empty. "
-        "DO NOT include code snippets. DO NOT EXPLAIN. ONLY the JSON array."
+        "DO NOT include code snippets. DO NOT EXPLAIN. ONLY the JSON object."
     )
 
     user_prompt = (
         "FILES AND CONTEXT (JSON array, one object per file):\n"
         + json.dumps(files_payload, ensure_ascii=True)
-        + "\n\nReturn ONLY one JSON array of issues. Every issue must include file_path."
+        + "\n\nReturn ONLY a JSON object with key 'issues' containing the array of issues. Every issue must include file_path."
     )
     if prompt_suffix:
         user_prompt += prompt_suffix
@@ -1009,6 +1022,7 @@ async def _run_batch_prompt_only(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.1,
+            response_format={"type": "json_object"},
         )
     except Exception as exc:
         raise RuntimeError(f"LLM request failed: {exc}") from exc
@@ -1170,7 +1184,7 @@ def analyze_single_file(file_path: str, run_id: int = 1) -> List[Dict[str, Any]]
     cfg = _load_config()
     base_path = cfg.get("base_path")
     project_name = cfg.get("project_name", "default")
-    db_path = Path(cfg.get("db", {}).get("path", DEFAULT_DB_PATH))
+    db_path = _get_sqlite_path()
 
     base_url = _resolve_base_url(os.getenv("OPENWEBUI_BASE_URL", ""))
     api_key = os.getenv("OPENWEBUI_API_KEY", "")
@@ -1220,7 +1234,7 @@ def analyze_file_batch(file_paths: List[str], run_id: int = 1) -> Dict[str, List
     cfg = _load_config()
     base_path = cfg.get("base_path")
     project_name = cfg.get("project_name", "default")
-    db_path = Path(cfg.get("db", {}).get("path", DEFAULT_DB_PATH))
+    db_path = _get_sqlite_path()
 
     base_url = _resolve_base_url(os.getenv("OPENWEBUI_BASE_URL", ""))
     api_key = os.getenv("OPENWEBUI_API_KEY", "")
@@ -1277,7 +1291,7 @@ def run_full_codebase_audit(run_id: int) -> int:
     cfg = _load_config()
     base_path = cfg.get("base_path")
     project_name = cfg.get("project_name", "default")
-    db_path = Path(cfg.get("db", {}).get("path", DEFAULT_DB_PATH))
+    db_path = _get_sqlite_path()
 
     # Determine files to skip if run was resumed
     skip_files: Set[str] = set()

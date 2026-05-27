@@ -1,46 +1,35 @@
-# Node/Vue
-node_modules/
+# =============================================================================
+# Code Audit Librarian — Git Isolation Configuration
+# =============================================================================
 
-# Python Virtual Environments
+# Python Virtual Environments & compiled files
 venv/
-env/
-.env
-.env.*
-!.env.example
-
-# Python Caches
+.venv/
 __pycache__/
 *.pyc
 *.pyo
-.pytest_cache/
+*.pyd
+.ipynb_checkpoints/
 
-# IDE files
-.vscode/
-.idea/
-
-# Custom Exclusions for Code Audit Librarian
-audit_history.db
-audit_history.db-wal
-audit_history.db-shm
-scan.log
-*.json
-# NOTE: project_config.yaml is tracked intentionally but MUST NOT contain real credentials.
-# All secrets (DB password, etc.) must live in .env — never hardcode them in the yaml.
-
-# Test Files
-*adminLogin.vue
-*adminlogin.vue
-
-# Documentation and Notes
-Task2.txt
-Task3_extracted.txt
-*.txt
-*.docx
-!requirements.txt
-!*web_tech_words.txt
-v3_architecture_summary.md
-
-# AI Docs
-AI_STATUS.md
+# Node.js dependencies and dynamic builds
 node_modules/
-eslint_report.json
+dist/
+report/frontend/dist/
+report/frontend/public/graph.json
+
+# VS Code Extension compilation & prebuilt binaries
+out/
+*.vsix
+.vscode-test/
+
+# SQLite databases & active WAL sidecars
+# Every developer workspace clones and builds its own baseline sqlite configuration
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Environment files & secrets
+.env
+.env.*
+! .env.example

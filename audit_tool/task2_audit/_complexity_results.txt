@@ -1,0 +1,6 @@
+=== complexity_checker.py self-test ===
+File  : C:\Users\Atharvaso\Desktop\final_approach_main\audit_tool\task2_audit\sample\sample.vue
+lines    : 0
+methods  : 0
+computed : 0
+watchers : 0
