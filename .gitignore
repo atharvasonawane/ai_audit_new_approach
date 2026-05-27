@@ -43,3 +43,6 @@ scan.log
 .env
 .env.*
 ! .env.example
+
+# Zipped submission packages
+*.zip

@@ -1653,8 +1653,8 @@ def _resolve_project_path(input_path: str) -> str:
     # 2. Try relative to known base directories
     base_dirs = []
     if PROJECT_ROOT:
-        base_dirs.append(PROJECT_ROOT.parent)  # e.g. Desktop
-        base_dirs.append(PROJECT_ROOT.parent.parent)  # e.g. Users/Atharvaso
+        base_dirs.append(PROJECT_ROOT.parent)
+        base_dirs.append(PROJECT_ROOT.parent.parent)
     try:
         base_dirs.append(Path.home())
         base_dirs.append(Path.home() / "Desktop")
