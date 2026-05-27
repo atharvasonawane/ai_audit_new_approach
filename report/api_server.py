@@ -2673,7 +2673,7 @@ def _fix_multi_word_component(file_lines, issue_line, issue_type, issue_message,
     connected = _find_component_references(expected_name, file_path_str)
 
     warnings = [
-        f"Component renamed: '{expected_name}' \u2192 '{new_name}' (deterministic fix applied)"
+        f"Component renamed: '{expected_name}' -> '{new_name}' (deterministic fix applied)"
     ]
     if connected:
         ref_names = [os.path.basename(c["file"]) for c in connected[:5]]
@@ -2682,10 +2682,10 @@ def _fix_multi_word_component(file_lines, issue_line, issue_type, issue_message,
             + ", ".join(ref_names)
         )
 
-    logger.info(f"[DETERMINISTIC FIX] Renamed '{expected_name}' \u2192 '{new_name}' in {file_path_str}")
+    logger.info(f"[DETERMINISTIC FIX] Renamed '{expected_name}' -> '{new_name}' in {file_path_str}")
     return {
         "fixed_lines": fixed_lines,
-        "description": f"Renamed component '{expected_name}' \u2192 '{new_name}'",
+        "description": f"Renamed component '{expected_name}' -> '{new_name}'",
         "old_name": expected_name,
         "new_name": new_name,
         "warnings": warnings,
