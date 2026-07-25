@@ -29,6 +29,13 @@ def run_eslint_scan(target_dir: str, dirty_files: List[str] = None) -> bool:
         audit_tool_dir = Path(__file__).parent.parent.parent
         report_path = audit_tool_dir / "eslint_report.json"
         
+        # Clean up any stale report file before running
+        if report_path.exists():
+            try:
+                report_path.unlink()
+            except Exception as e:
+                logger.warning(f"Could not delete stale ESLint report: {e}")
+        
         # Build base ESLint command
         base_cmd = [
             "npx", "eslint",
@@ -65,6 +72,13 @@ def run_eslint_scan(target_dir: str, dirty_files: List[str] = None) -> bool:
         
         for i, chunk in enumerate(chunks):
             cmd = base_cmd + chunk
+            
+            # Clean up output file from previous chunk to avoid reading stale/duplicate data
+            if report_path.exists():
+                try:
+                    report_path.unlink()
+                except Exception:
+                    pass
             
             try:
                 result = subprocess.run(

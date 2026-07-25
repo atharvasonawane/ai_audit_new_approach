@@ -12,8 +12,34 @@ export function activate(context: vscode.ExtensionContext) {
 
         const workspaceFolders = vscode.workspace.workspaceFolders;
 
-        // Absolute path to the project root — resolved dynamically relative to context
-        const rootPath = path.resolve(context.extensionPath, '..');
+        // Resolve project root path (checking configuration settings first, then development path, then hardcoded workspace location)
+        const config = vscode.workspace.getConfiguration('code-audit-librarian');
+        const customPath = config.get<string>('enginePath');
+        
+        let rootPath = '';
+        if (customPath && fs.existsSync(customPath) && fs.existsSync(path.join(customPath, 'report', 'api_server.py'))) {
+            rootPath = path.resolve(customPath);
+        } else {
+            // Check if parent directory contains report/api_server.py (development mode / symlink)
+            const parentPath = path.resolve(context.extensionPath, '..');
+            if (fs.existsSync(path.join(parentPath, 'report', 'api_server.py'))) {
+                rootPath = parentPath;
+            } else {
+                // Hardcoded fallback for default project location
+                const hardcodedFallback = 'd:\\final_approach_main';
+                if (fs.existsSync(path.join(hardcodedFallback, 'report', 'api_server.py'))) {
+                    rootPath = hardcodedFallback;
+                }
+            }
+        }
+
+        if (!rootPath) {
+            vscode.window.showErrorMessage(
+                "Code Audit Librarian: Could not locate project engine files. " +
+                "Please configure 'code-audit-librarian.enginePath' in your VS Code settings to point to your cloned repository."
+            );
+            return;
+        }
 
         const workspacePath = workspaceFolders && workspaceFolders.length > 0
             ? workspaceFolders[0].uri.fsPath
@@ -49,6 +75,7 @@ export function activate(context: vscode.ExtensionContext) {
         // Central message router — all Webview→Extension communication goes here.
         panel.webview.onDidReceiveMessage(
             async (message: { command: string; payload?: Record<string, unknown> }) => {
+                console.log('[CAL Webview Message received]', message);
                 switch (message.command) {
                     case 'webviewReady': {
                         const folders = vscode.workspace.workspaceFolders;
@@ -167,10 +194,12 @@ let highlightDecoration: vscode.TextEditorDecorationType | undefined;
  * Standalone helper to handle jumping to a specific file and line inside the VS Code editor.
  */
 async function handleJumpToCode(payload: Record<string, unknown>): Promise<void> {
+    console.log('[CAL handleJumpToCode received]', payload);
     const filePath = payload.filePath as string;
     const lineNumber = payload.lineNumber as number;
 
     const fileUri = resolveFileUri(filePath);
+    console.log('[CAL resolved URI]', fileUri ? fileUri.toString() : 'null');
     if (!fileUri) {
         return; // resolveFileUri already showed warning/error message
     }
@@ -231,6 +260,7 @@ function resolveFileUri(relativePath: string): vscode.Uri | undefined {
     }
 
     const workspaceRoot = workspaceFolders[0].uri.fsPath;
+    console.log('[CAL ResolveFileUri] relativePath:', relativePath, 'workspaceRoot:', workspaceRoot);
 
     // ── Step 1: Normalize incoming path to OS-native separators ────────────────
     // Database stores paths with forward slashes; Windows needs backslashes.

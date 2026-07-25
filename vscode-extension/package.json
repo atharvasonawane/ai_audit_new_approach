@@ -18,7 +18,17 @@
         "command": "code-audit-librarian.open",
         "title": "Code Audit Librarian: Open"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Code Audit Librarian",
+      "properties": {
+        "code-audit-librarian.enginePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the cloned Code Audit Librarian project directory (containing audit_tool, report, etc.)"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

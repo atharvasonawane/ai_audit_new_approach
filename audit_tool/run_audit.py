@@ -94,6 +94,42 @@ if not cfg.get("module"):
 
 # Load environment variables and override database credentials safely
 load_dotenv()
+
+def inject_node_path():
+    paths_to_inject = []
+    
+    # 1. Check NVM_SYMLINK
+    nvm_symlink = os.getenv("NVM_SYMLINK")
+    if nvm_symlink and os.path.exists(nvm_symlink):
+        paths_to_inject.append(nvm_symlink)
+        
+    # 2. Check NVM_HOME nodejs/nodejs
+    nvm_home = os.getenv("NVM_HOME")
+    if nvm_home:
+        candidate = os.path.join(nvm_home, "nodejs", "nodejs")
+        if os.path.exists(candidate):
+            paths_to_inject.append(candidate)
+            
+    # 3. Check Scoop specific paths
+    scoop_candidates = [
+        r"C:\Users\LENOVO\scoop\apps\nvm\current\nodejs\nodejs",
+        r"C:\Users\LENOVO\scoop\persist\nvm\nodejs\nodejs"
+    ]
+    for sc in scoop_candidates:
+        if os.path.exists(sc) and sc not in paths_to_inject:
+            paths_to_inject.append(sc)
+            
+    # 4. Check default NVM path
+    nvm_path_default = os.path.join(os.environ.get("LOCALAPPDATA", ""), "nvm", "v24.14.1")
+    if os.path.exists(nvm_path_default) and nvm_path_default not in paths_to_inject:
+        paths_to_inject.append(nvm_path_default)
+        
+    if paths_to_inject:
+        injected = os.pathsep.join(paths_to_inject)
+        os.environ["PATH"] = injected + os.pathsep + os.environ.get("PATH", "")
+        logger.info(f"Injecting Node path(s) globally: {injected}")
+
+inject_node_path()
 if "db" not in cfg:
     cfg["db"] = {}
 cfg["db"]["host"] = os.getenv("MYSQL_HOST", cfg["db"].get("host", "localhost"))
@@ -424,12 +460,40 @@ def _run_report_phase():
     logger.info(f"Launching Backend Server: {' '.join(backend_cmd)}")
     backend_proc = subprocess.Popen(backend_cmd)
     
-    # Inject Node 24 into PATH to bypass NVM symlink issues
+    # Inject Node into PATH to bypass NVM/Scoop symlink issues
     env = os.environ.copy()
-    nvm_path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "nvm", "v24.14.1")
-    if os.path.exists(nvm_path):
-        env["PATH"] = nvm_path + os.pathsep + env.get("PATH", "")
-        logger.info(f"Injecting NVM Node 24 path into environment: {nvm_path}")
+    paths_to_inject = []
+    
+    # 1. Check NVM_SYMLINK
+    nvm_symlink = os.getenv("NVM_SYMLINK")
+    if nvm_symlink and os.path.exists(nvm_symlink):
+        paths_to_inject.append(nvm_symlink)
+        
+    # 2. Check NVM_HOME nodejs/nodejs
+    nvm_home = os.getenv("NVM_HOME")
+    if nvm_home:
+        candidate = os.path.join(nvm_home, "nodejs", "nodejs")
+        if os.path.exists(candidate):
+            paths_to_inject.append(candidate)
+            
+    # 3. Check Scoop specific paths
+    scoop_candidates = [
+        r"C:\Users\LENOVO\scoop\apps\nvm\current\nodejs\nodejs",
+        r"C:\Users\LENOVO\scoop\persist\nvm\nodejs\nodejs"
+    ]
+    for sc in scoop_candidates:
+        if os.path.exists(sc) and sc not in paths_to_inject:
+            paths_to_inject.append(sc)
+            
+    # 4. Check default NVM path
+    nvm_path_default = os.path.join(os.environ.get("LOCALAPPDATA", ""), "nvm", "v24.14.1")
+    if os.path.exists(nvm_path_default) and nvm_path_default not in paths_to_inject:
+        paths_to_inject.append(nvm_path_default)
+        
+    if paths_to_inject:
+        injected = os.pathsep.join(paths_to_inject)
+        env["PATH"] = injected + os.pathsep + env.get("PATH", "")
+        logger.info(f"Injecting Node path(s) into environment: {injected}")
 
     logger.info(f"Launching Frontend Server: {frontend_cmd} (cwd: {frontend_cwd})")
     frontend_proc = subprocess.Popen(frontend_cmd, cwd=frontend_cwd, shell=True, env=env)

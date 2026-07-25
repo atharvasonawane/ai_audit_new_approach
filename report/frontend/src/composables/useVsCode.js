@@ -22,6 +22,17 @@ export function useVsCode() {
         console.log('[System Notice] VS Code API is not available. Operating in standard browser mode.');
     }
 
+    function sendMessage(command, payload) {
+        if (vsCodeApiCache) {
+            vsCodeApiCache.postMessage({
+                command,
+                payload
+            });
+        } else {
+            console.log(`[Browser Mode Override] Sent message: ${command}`, payload);
+        }
+    }
+
     /**
      * Requests the VS Code extension host to jump to the specified file and line.
      * Falls back to a browser trace when running outside the VS Code webview.
@@ -30,20 +41,14 @@ export function useVsCode() {
      * @param {number|string} lineNumber - 1-indexed target line number
      */
     function jumpToCode(filePath, lineNumber) {
-        if (vsCodeApiCache) {
-            vsCodeApiCache.postMessage({
-                command: 'jumpToCode',
-                payload: {
-                    filePath,
-                    lineNumber: Number(lineNumber)
-                }
-            });
-        } else {
-            console.log(`[Browser Mode Override] Jump targeted to: ${filePath} line ${lineNumber}`);
-        }
+        sendMessage('jumpToCode', {
+            filePath,
+            lineNumber: Number(lineNumber)
+        });
     }
 
     return {
+        sendMessage,
         jumpToCode,
         isVsCode: typeof acquireVsCodeApi !== 'undefined'
     };

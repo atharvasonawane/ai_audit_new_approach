@@ -38,6 +38,7 @@ out/
 # Logging output
 *.log
 scan.log
+eslint_report.json
 
 # Environment files & secrets
 .env
