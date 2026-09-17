@@ -1,4 +1,4 @@
-base_path: D:\StudentManagement
+base_path: C:\PortalManagement\client
 db:
   path: audit_history.db
 generic_api:
@@ -11,7 +11,7 @@ module: null
 mql:
   confidence: HIGH
   pattern: \w+\.\[(\w+)\]
-project_name: StudentManagement
+project_name: client
 spelling:
   ignore_words:
   - DU

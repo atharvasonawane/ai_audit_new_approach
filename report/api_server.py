@@ -1773,10 +1773,16 @@ def scan_project():
 
         # Run the pipeline
         run_audit_script = PROJECT_ROOT / "audit_tool" / "run_audit.py"
-        python_exe = PROJECT_ROOT / "audit_tool" / "venv" / "Scripts" / "python.exe"
+        root_venv = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
+        inner_venv = PROJECT_ROOT / "audit_tool" / "venv" / "Scripts" / "python.exe"
         
-        # Determine python executable to use
-        exe = str(python_exe) if python_exe.exists() else sys.executable
+        # Determine python executable to use (prioritize root venv, fall back to audit_tool venv)
+        if root_venv.exists():
+            exe = str(root_venv)
+        elif inner_venv.exists():
+            exe = str(inner_venv)
+        else:
+            exe = sys.executable
         
         logger.info(f"Executing pipeline: {exe} {run_audit_script} --no-report")
         

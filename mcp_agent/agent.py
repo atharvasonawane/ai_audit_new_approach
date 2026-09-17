@@ -437,7 +437,7 @@ async def generate_executive_synthesis(run_id: int, project_name: str) -> None:
     base_url = _resolve_base_url(os.getenv("OPENWEBUI_BASE_URL", ""))
     api_key = os.getenv("OPENWEBUI_API_KEY", "")
     timeout = int(os.getenv("LLM_TIMEOUT_SECONDS", "90"))
-    llm = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+    llm = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout, max_retries=5)
 
     system_prompt = (
         "You are a Principal Software Architect preparing an executive summary for a development team "
@@ -465,6 +465,7 @@ async def generate_executive_synthesis(run_id: int, project_name: str) -> None:
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.35,
+            max_tokens=1500,
         )
         if response and getattr(response, "choices", None):
             synthesis_text = (response.choices[0].message.content or "").strip()
@@ -821,6 +822,7 @@ async def _run_tool_loop(
                 tools=tool_defs,
                 tool_choice="auto",
                 temperature=0.2,
+                max_tokens=800,
             )
         except Exception as exc:
             raise RuntimeError(f"LLM request failed: {exc}") from exc
@@ -942,6 +944,7 @@ async def _run_prompt_only(
             ],
             temperature=0.1,
             response_format={"type": "json_object"},
+            max_tokens=800,
         )
     except Exception as exc:
         raise RuntimeError(f"LLM request failed: {exc}") from exc
@@ -1023,6 +1026,7 @@ async def _run_batch_prompt_only(
             ],
             temperature=0.1,
             response_format={"type": "json_object"},
+            max_tokens=800,
         )
     except Exception as exc:
         raise RuntimeError(f"LLM request failed: {exc}") from exc
@@ -1085,7 +1089,7 @@ async def _run_full_codebase_async(
 ) -> None:
     base_url = _resolve_base_url(os.getenv("OPENWEBUI_BASE_URL", ""))
     api_key = os.getenv("OPENWEBUI_API_KEY", "")
-    llm = OpenAI(base_url=base_url, api_key=api_key)
+    llm = OpenAI(base_url=base_url, api_key=api_key, max_retries=5)
 
     async with MCPToolClient(SERVER_PATH) as client:
         n_complex = len(complex_files)
@@ -1122,6 +1126,7 @@ async def _run_full_codebase_async(
                 run_id, fp, issues, base_path, project_name, db_path
             )
             _update_run_last_file(db_path, run_id, fp)
+            await asyncio.sleep(2)
 
         n_simple = len(simple_files)
         if n_simple:
@@ -1175,6 +1180,7 @@ async def _run_full_codebase_async(
                     run_id, fp, file_issues, base_path, project_name, db_path
                 )
                 _update_run_last_file(db_path, run_id, fp)
+            await asyncio.sleep(2)
 
 
 def analyze_single_file(file_path: str, run_id: int = 1) -> List[Dict[str, Any]]:
@@ -1188,7 +1194,7 @@ def analyze_single_file(file_path: str, run_id: int = 1) -> List[Dict[str, Any]]
 
     base_url = _resolve_base_url(os.getenv("OPENWEBUI_BASE_URL", ""))
     api_key = os.getenv("OPENWEBUI_API_KEY", "")
-    llm = OpenAI(base_url=base_url, api_key=api_key)
+    llm = OpenAI(base_url=base_url, api_key=api_key, max_retries=5)
 
     async def _run() -> List[Dict[str, Any]]:
         async with MCPToolClient(SERVER_PATH) as client:
@@ -1238,7 +1244,7 @@ def analyze_file_batch(file_paths: List[str], run_id: int = 1) -> Dict[str, List
 
     base_url = _resolve_base_url(os.getenv("OPENWEBUI_BASE_URL", ""))
     api_key = os.getenv("OPENWEBUI_API_KEY", "")
-    llm = OpenAI(base_url=base_url, api_key=api_key)
+    llm = OpenAI(base_url=base_url, api_key=api_key, max_retries=5)
 
     async def _run() -> Dict[str, List[Dict[str, Any]]]:
         async with MCPToolClient(SERVER_PATH) as client:
@@ -1339,6 +1345,7 @@ def run_full_codebase_audit(run_id: int) -> int:
             project_name,
             db_path,
         )
+        await asyncio.sleep(3)
         await generate_executive_synthesis(run_id, project_name)
 
     try:

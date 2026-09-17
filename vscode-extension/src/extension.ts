@@ -45,7 +45,9 @@ export function activate(context: vscode.ExtensionContext) {
             ? workspaceFolders[0].uri.fsPath
             : rootPath;  // fall back to project root when no folder is open
         const apiServerPath = path.join(rootPath, 'report', 'api_server.py');
-        const venvPythonPath = path.join(rootPath, 'audit_tool', 'venv', 'Scripts', 'python.exe');
+        const rootVenvPython = path.join(rootPath, 'venv', 'Scripts', 'python.exe');
+        const innerVenvPython = path.join(rootPath, 'audit_tool', 'venv', 'Scripts', 'python.exe');
+        const venvPythonPath = fs.existsSync(rootVenvPython) ? rootVenvPython : innerVenvPython;
 
         // Spawn the Flask server
         try {
