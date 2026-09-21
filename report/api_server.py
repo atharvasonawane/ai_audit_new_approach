@@ -347,8 +347,18 @@ def _normalize_relative_path(file_path: str) -> str:
 
 
 def _get_workspace_roots() -> List[Path]:
+    # Dynamically re-read base_path from config so a stale server instance
+    # (started before project_config.yaml was updated) still resolves correctly.
+    live_base_path = BASE_PATH
+    try:
+        if CONFIG_PATH.exists():
+            live_cfg = yaml.safe_load(open(CONFIG_PATH, "r", encoding="utf-8")) or {}
+            live_base_path = live_cfg.get("base_path", BASE_PATH)
+    except Exception:
+        pass  # Fall back to module-level BASE_PATH on any read error
+
     roots: List[Path] = []
-    for raw_root in [BASE_PATH, str(PROJECT_ROOT), str(PROJECT_ROOT.parent)]:
+    for raw_root in [live_base_path, str(PROJECT_ROOT), str(PROJECT_ROOT.parent)]:
         if not raw_root:
             continue
         try:
@@ -2839,7 +2849,7 @@ def ai_fix_endpoint():
             return jsonify({"error": f"Source file not found: {incoming_path}"}), 400
 
         target_path = str(target_path_obj)
-        logger.info(f"[AI FIX] Resolved: {incoming_path} \u2192 {target_path}")
+        logger.info(f"[AI FIX] Resolved: {incoming_path} -> {target_path}")
 
         # ── Step 2: Read file ──
         try:
@@ -2954,7 +2964,7 @@ def ai_fix_endpoint():
             "3. Change ONLY the minimum lines needed to fix this specific issue.\n"
             "4. Do NOT change unrelated code, do NOT add comments, do NOT refactor.\n"
             "5. For naming rules (e.g. multi-word-component-names): rename the identifier "
-            "(e.g. 'Header' \u2192 'AppHeader').\n"
+            "(e.g. 'Header' -> 'AppHeader').\n"
             "6. For accessibility rules: add the missing attribute/handler.\n"
             "7. Output raw source code ONLY. No markdown fences, no explanations, no labels.\n"
             "8. Preserve exact indentation and whitespace."
@@ -2978,6 +2988,12 @@ def ai_fix_endpoint():
         resolved_base_url = _resolve_base_url(raw_base_url)
         api_url = f"{resolved_base_url}/chat/completions"
 
+        max_tokens_val = os.getenv("LLM_MAX_TOKENS", "800")
+        try:
+            max_tokens = int(max_tokens_val)
+        except ValueError:
+            max_tokens = 800
+
         payload = {
             "model": model_name,
             "messages": [
@@ -2985,6 +3001,7 @@ def ai_fix_endpoint():
                 {"role": "user", "content": f"Source code (lines {start_idx + 1}-{end_idx}):\n{original_window_text}"}
             ],
             "temperature": 0.1,
+            "max_tokens": max_tokens,
             "stream": False
         }
 
