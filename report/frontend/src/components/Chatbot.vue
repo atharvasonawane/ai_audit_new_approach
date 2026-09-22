@@ -28,16 +28,29 @@
           <span class="text-[9px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest leading-none">AI Copilot</span>
         </div>
       </div>
-      <button 
-        class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
-        @click="$emit('close')"
-        title="Close Sidebar"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <line x1="18" y1="6" x2="6" y2="18"/>
-          <line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
+      <div class="flex items-center gap-1">
+        <button 
+          v-if="messages.length > 0"
+          class="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+          @click="clearChatHistory"
+          title="Clear Conversation History"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+        <button 
+          class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+          @click="$emit('close')"
+          title="Close Sidebar"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- Messages Container -->
@@ -72,30 +85,67 @@
             <span class="w-1.5 h-1.5 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
           </div>
 
-          <!-- Message content with inline file/code badges -->
-          <div v-if="msg.content" class="whitespace-pre-wrap font-sans break-words leading-relaxed text-[13px]">
-            <template v-for="(part, pi) in renderBadges(msg.content)" :key="pi">
-              <!-- File badge: clickable token that navigates the dashboard to the file -->
-              <button
-                v-if="part.isFile"
-                class="max-w-full bg-indigo-50 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100/50 dark:border-indigo-800/40 hover:border-indigo-400 px-2.5 py-1 rounded-md cursor-pointer hover:underline font-mono inline-flex items-center gap-1.5 text-[11px] mx-0.5 my-0.5 transition-all shadow-sm font-semibold align-middle overflow-hidden"
-                :title="'Jump to ' + part.text"
-                @click="$emit('navigate-to-file', part.text)"
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="opacity-80 shrink-0">
-                  <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
-                  <polyline points="13 2 13 9 20 9"/>
-                </svg>
-                <span class="truncate block max-w-[150px] sm:max-w-[260px]">{{ part.text }}</span>
-              </button>
-              <!-- Inline code highlight -->
-              <span
-                v-else-if="part.isCode"
-                class="bg-amber-500/10 dark:bg-amber-400/10 text-amber-600 dark:text-amber-400 border border-amber-500/10 dark:border-amber-400/10 px-1 py-0.5 rounded font-mono text-[12px] font-semibold mx-0.5 shadow-sm break-all align-middle"
-              >{{ part.text }}</span>
-              <!-- Plain text span -->
-              <span v-else>{{ part.text }}</span>
-            </template>
+          <!-- Message content with formatted markdown and inline file/code badges -->
+          <div v-if="msg.content" class="font-sans break-words text-[13px] space-y-1.5">
+            <div v-for="(block, bi) in parseContent(msg.content)" :key="bi">
+              <!-- Fenced code block -->
+              <div v-if="block.type === 'code'" class="my-2 rounded-lg bg-gray-900 text-gray-100 p-3 overflow-x-auto text-[11.5px] font-mono shadow-inner border border-gray-800">
+                <div class="text-[10px] uppercase font-bold text-gray-400 mb-1.5 flex justify-between items-center select-none border-b border-gray-800/80 pb-1">
+                  <span>{{ block.lang || 'code' }}</span>
+                </div>
+                <pre class="m-0 whitespace-pre leading-relaxed font-mono">{{ block.code }}</pre>
+              </div>
+
+              <!-- Text block with formatted lines -->
+              <div v-else class="space-y-1">
+                <div
+                  v-for="(line, li) in block.lines"
+                  :key="li"
+                  :class="[
+                    line.type === 'h1' || line.type === 'h2' || line.type === 'h3' ? 'font-bold text-[13.5px] text-gray-900 dark:text-white pt-1' : '',
+                    line.type === 'bullet' ? 'flex items-start gap-1.5 pl-1.5 text-[12.5px] leading-relaxed' : '',
+                    line.type === 'numbered' ? 'flex items-start gap-1.5 pl-1 text-[12.5px] leading-relaxed' : '',
+                    line.type === 'normal' ? 'leading-relaxed text-[13px]' : ''
+                  ]"
+                >
+                  <!-- Bullet prefix -->
+                  <span v-if="line.type === 'bullet'" class="text-indigo-500 shrink-0 select-none leading-relaxed">•</span>
+                  <!-- Number prefix -->
+                  <span v-if="line.type === 'numbered'" class="text-indigo-500 font-semibold shrink-0 select-none text-[11.5px] leading-relaxed">{{ line.numPrefix }}</span>
+
+                  <!-- Inline Tokens -->
+                  <div class="inline-block flex-1 min-w-0">
+                    <template v-for="(part, pi) in line.tokens" :key="pi">
+                      <!-- File badge: clickable token that navigates the dashboard to the file -->
+                      <button
+                        v-if="part.type === 'file'"
+                        class="max-w-full bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 border border-indigo-100/60 dark:border-indigo-800/60 hover:border-indigo-400 px-2 py-0.5 rounded-md cursor-pointer hover:underline font-mono inline-flex items-center gap-1.5 text-[11px] mx-0.5 my-0.5 transition-all shadow-sm font-semibold align-middle overflow-hidden"
+                        :title="'Jump to ' + part.text"
+                        @click="$emit('navigate-to-file', part.text)"
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="opacity-80 shrink-0">
+                          <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+                          <polyline points="13 2 13 9 20 9"/>
+                        </svg>
+                        <span class="truncate block max-w-[150px] sm:max-w-[260px]">{{ part.text }}</span>
+                      </button>
+                      <!-- Bold highlight -->
+                      <strong
+                        v-else-if="part.type === 'bold'"
+                        class="font-bold text-gray-900 dark:text-white"
+                      >{{ part.text }}</strong>
+                      <!-- Inline code highlight -->
+                      <span
+                        v-else-if="part.type === 'code'"
+                        class="bg-amber-500/10 dark:bg-amber-400/10 text-amber-600 dark:text-amber-400 border border-amber-500/10 dark:border-amber-400/10 px-1 py-0.2 rounded font-mono text-[11.5px] font-semibold mx-0.5 shadow-sm break-all align-middle"
+                      >{{ part.text }}</span>
+                      <!-- Plain text span -->
+                      <span v-else>{{ part.text }}</span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -206,9 +256,11 @@ const isLoading = ref(false)
 const messageContainer = ref(null)
 
 const chips = [
-  "Show Critical Finding Summary",
   "Worst Files by Issue Counts",
-  "Check Accessibility Failures"
+  "Top WCAG Accessibility Violations",
+  "What API Endpoints Are Called?",
+  "Check Dependency Cycles & Graph",
+  "Show Critical Finding Summary"
 ]
 
 // ── Resizable Chatbot Sidebar Logic ───────────────────────────────────────────
@@ -295,56 +347,126 @@ const selectChip = (chipText) => {
   submitMessage()
 }
 
+const clearChatHistory = () => {
+  messages.value = []
+  try {
+    localStorage.removeItem(storageKey.value)
+  } catch (e) {
+    console.warn('[Chat] Failed to clear localStorage history:', e)
+  }
+}
+
 /**
- * renderBadges: Splits a message string into segments.
- * Tokens ending in .vue, .js, or .ts are returned as { isFile: true, text }.
- * Tokens wrapped inside backticks are returned as { isCode: true, text }.
- * Standard text is returned as { isFile: false, isCode: false, text }.
+ * parseContent: Breaks raw message string into structured blocks (code blocks, text blocks).
  */
-const renderBadges = (content) => {
-  if (!content) return [{ isFile: false, isCode: false, text: '' }]
-  const parts = []
+const parseContent = (content) => {
+  if (!content) return []
+  const blocks = []
+  const codeBlockRegex = /```([a-zA-Z0-9_-]*)\s*\n([\s\S]*?)(?:```|$)/g
   let lastIndex = 0
   let match
-  // Matches `inline_code` or a file reference like client/src/App.vue
-  const regex = /(`[^`]+`|[\w./\-]+\.(?:vue|js|ts))/g
-  
-  while ((match = regex.exec(content)) !== null) {
+
+  while ((match = codeBlockRegex.exec(content)) !== null) {
     if (match.index > lastIndex) {
-      parts.push({
-        isFile: false,
-        isCode: false,
-        text: content.slice(lastIndex, match.index)
+      blocks.push({
+        type: 'text',
+        lines: parseTextLines(content.slice(lastIndex, match.index))
       })
     }
-    
-    const token = match[0]
-    if (token.startsWith('`') && token.endsWith('`')) {
-      parts.push({
-        isFile: false,
-        isCode: true,
-        text: token.slice(1, -1)
-      })
-    } else {
-      parts.push({
-        isFile: true,
-        isCode: false,
-        text: token
-      })
-    }
-    
-    lastIndex = regex.lastIndex
+    blocks.push({
+      type: 'code',
+      lang: match[1] || 'code',
+      code: match[2].trimEnd()
+    })
+    lastIndex = codeBlockRegex.lastIndex
   }
-  
+
   if (lastIndex < content.length) {
-    parts.push({
-      isFile: false,
-      isCode: false,
-      text: content.slice(lastIndex)
+    blocks.push({
+      type: 'text',
+      lines: parseTextLines(content.slice(lastIndex))
     })
   }
-  
-  return parts
+
+  return blocks
+}
+
+/**
+ * parseTextLines: Analyzes each line for markdown block types (headers, bullets, numbered lists).
+ */
+const parseTextLines = (rawText) => {
+  const rawLines = rawText.split('\n')
+  return rawLines.map(line => {
+    const trimmed = line.trim()
+    let lineType = 'normal'
+    let textToTokenize = line
+
+    if (trimmed.startsWith('### ')) {
+      lineType = 'h3'
+      textToTokenize = trimmed.slice(4)
+    } else if (trimmed.startsWith('## ')) {
+      lineType = 'h2'
+      textToTokenize = trimmed.slice(3)
+    } else if (trimmed.startsWith('# ')) {
+      lineType = 'h1'
+      textToTokenize = trimmed.slice(2)
+    } else if (/^[-*]\s+/.test(trimmed)) {
+      lineType = 'bullet'
+      textToTokenize = trimmed.replace(/^[-*]\s+/, '')
+    } else if (/^\d+\.\s+/.test(trimmed)) {
+      lineType = 'numbered'
+      const numMatch = trimmed.match(/^(\d+\.)\s+(.*)/)
+      const numPrefix = numMatch ? numMatch[1] : '1.'
+      textToTokenize = numMatch ? numMatch[2] : trimmed
+      return {
+        type: lineType,
+        numPrefix,
+        tokens: tokenizeInline(textToTokenize)
+      }
+    }
+
+    return {
+      type: lineType,
+      tokens: tokenizeInline(textToTokenize)
+    }
+  })
+}
+
+/**
+ * tokenizeInline: Parses inline tokens: bold **text**, code `code`, and file badges (.vue/.js/.ts).
+ */
+const tokenizeInline = (lineText) => {
+  if (!lineText) return [{ type: 'text', text: '' }]
+  const tokens = []
+  const regex = /(`[^`]+`|\*\*[^*]+\*\*|[\w./\-]+\.(?:vue|js|ts))/g
+  let lastIdx = 0
+  let m
+
+  while ((m = regex.exec(lineText)) !== null) {
+    if (m.index > lastIdx) {
+      tokens.push({ type: 'text', text: lineText.slice(lastIdx, m.index) })
+    }
+    const token = m[0]
+    if (token.startsWith('`') && token.endsWith('`')) {
+      tokens.push({ type: 'code', text: token.slice(1, -1) })
+    } else if (token.startsWith('**') && token.endsWith('**')) {
+      const inner = token.slice(2, -2)
+      if (/[\w./\-]+\.(?:vue|js|ts)/.test(inner)) {
+        tokens.push({ type: 'file', text: inner.trim() })
+      } else {
+        tokens.push({ type: 'bold', text: inner })
+      }
+    } else {
+      tokens.push({ type: 'file', text: token })
+    }
+    lastIdx = regex.lastIndex
+  }
+
+  if (lastIdx < lineText.length) {
+    tokens.push({ type: 'text', text: lineText.slice(lastIdx) })
+  }
+
+  return tokens
 }
 
 const submitMessage = async () => {

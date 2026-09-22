@@ -2051,13 +2051,14 @@ def _resolve_base_url(base_url: str) -> str:
     return base_url.rstrip("/") + "/api/v1"
 
 
-def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str):
+def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str, history: Optional[List[dict]] = None):
     """
-    Dynamically compile context from database tables based on run_id and case-insensitive keywords in message.
+    Dynamically compile rich, grounded context from database tables based on run_id,
+    schema-aware intent detection, and recent conversation history.
     Returns a tuple of (context_str, sources_list) where sources_list documents which DB tables were queried.
     """
-    # --- Source citation tracker: appended for each triggered query branch ---
     sources = []
+    message_lower = message.lower()
 
     # 1. Always Fetch: General audit run stats
     run_row = conn.execute(
@@ -2091,8 +2092,8 @@ def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str):
 
     # Core tables are always queried
     sources.append("Table: audit_runs (Run Metadata & Status)")
-    sources.append("Table: vue_files (Aggregate ESLint Flag Counts)")
-    sources.append("Table: accessibility_defects (Aggregate WCAG Defect Counts)")
+    sources.append("Table: vue_files (Aggregate ESLint Counts)")
+    sources.append("Table: accessibility_defects (Aggregate WCAG Counts)")
     sources.append("Table: ai_issues (Aggregate AI Issue Counts)")
     
     context_parts = [
@@ -2110,113 +2111,300 @@ def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str):
         f"  - Total AI Code Quality Issues: {ai_issue_count}",
         ""
     ]
-    
-    message_lower = message.lower()
-    
-    # 2. File mentions: Search for words matching custom components
-    # Gather all file paths in this run
+
+    # Gather all file paths in this run for matching
     all_files_rows = conn.execute(
         "SELECT file_path FROM vue_files WHERE run_id = ?",
         (run_id,)
     ).fetchall()
     file_paths = [r["file_path"] for r in all_files_rows]
     
-    extracted_words = []
-    # Scan for expressions containing explicit extensions (e.g. '.vue', '.js', '.ts')
+    # 2. Target File Resolution
+    target_files = []
+    
+    # A. Check explicit file extension in message (e.g. '.vue', '.js', '.ts')
     words = re.findall(r'[\w\.\-/]+', message_lower)
-    has_ext = False
     for w in words:
         if any(ext in w for ext in ('.vue', '.js', '.ts')):
-            has_ext = True
-            cleaned_w = w.strip("./- ")
-            if cleaned_w:
-                extracted_words.append(cleaned_w)
-                
-    # If no exact extension is found, check if any unique alphanumeric words longer than 3 characters match
-    if not has_ext:
-        raw_words = re.findall(r'[a-zA-Z0-9]{4,}', message_lower)
-        for rw in raw_words:
+            cleaned = w.strip("./- ")
             for fp in file_paths:
-                filename_lower = os.path.basename(fp).lower()
-                if rw in filename_lower or rw in fp.lower():
-                    if rw not in extracted_words:
-                        extracted_words.append(rw)
-                        
-    # Execute database lookup using wildcard approach
-    matched_files = []
-    seen_paths = set()
-    for clean_name in extracted_words:
-        file_rows = conn.execute(
-            """
-            SELECT file_path, script_lines, template_lines, eslint_flag_count, cyclomatic_complexity 
-            FROM vue_files 
-            WHERE run_id = ? AND LOWER(file_path) LIKE ?
-            """,
-            (run_id, f"%{clean_name}%")
-        ).fetchall()
-        
-        for row in file_rows:
-            fp = row["file_path"]
-            if fp not in seen_paths:
-                seen_paths.add(fp)
-                matched_files.append(row)
-            
-    if matched_files:
-        sources.append("Table: vue_files (Targeted File Data Scan)")
-        sources.append("Table: file_flags (ESLint Flags per Mentioned File)")
-        sources.append("Table: accessibility_defects (WCAG Defects per Mentioned File)")
-        sources.append("Table: ai_issues (AI Issues per Mentioned File)")
-        context_parts.append("=== SPECIFIC FILE DETAILS (Triggered by File Mentions) ===")
-        for f in matched_files:
-            fp = f["file_path"]
+                if cleaned in fp.lower() or os.path.basename(fp).lower() == cleaned:
+                    if fp not in target_files:
+                        target_files.append(fp)
+
+    # B. Match unique component basenames (e.g. 'studentlogin', 'rolemgt')
+    # Filter out generic words to avoid matching folder names like 'components/' or 'views/'
+    generic_words = {
+        "view", "views", "component", "components", "table", "index", "main", "test",
+        "file", "files", "router", "store", "utils", "what", "which", "show", "tell",
+        "find", "list", "check", "code", "audit", "high", "worst", "most", "about",
+        "here", "have", "make", "many", "much", "some", "error", "errors", "issue", "issues"
+    }
+    if not target_files:
+        raw_words = re.findall(r'[a-zA-Z0-9_-]{4,}', message_lower)
+        for rw in raw_words:
+            if rw in generic_words:
+                continue
+            for fp in file_paths:
+                stem = os.path.splitext(os.path.basename(fp))[0].lower()
+                if rw == stem:
+                    if fp not in target_files:
+                        target_files.append(fp)
+
+    # C. Multi-turn continuity: resolve pronouns ("it", "this file", "the component") from recent history
+    pronouns = ["it", "its", "this file", "that file", "the component", "this component", "the file"]
+    has_pronoun = any(p in message_lower for p in pronouns)
+    if not target_files and history and (has_pronoun or len(words) <= 6):
+        for prev in reversed(history[-4:]):
+            prev_content = prev.get("content", "")
+            prev_matches = re.findall(r'[\w./\-]+\.(?:vue|js|ts)', prev_content)
+            for pm in prev_matches:
+                for fp in file_paths:
+                    if pm.lower() in fp.lower() or os.path.basename(fp).lower() == pm.lower():
+                        if fp not in target_files:
+                            target_files.append(fp)
+            if target_files:
+                break
+
+    # Cap matched files to top 2 to avoid prompt bloat
+    target_files = target_files[:2]
+
+    if target_files:
+        sources.append("Table: vue_files (Targeted File Metrics)")
+        sources.append("Table: file_flags (ESLint Flags for Target File)")
+        sources.append("Table: accessibility_defects (WCAG Defects for Target File)")
+        sources.append("Table: ai_issues (AI Findings for Target File)")
+        sources.append("Table: api_calls (API Calls for Target File)")
+        context_parts.append("=== SPECIFIC FILE DETAILS (Targeted Code Entity) ===")
+        for fp in target_files:
+            file_row = conn.execute(
+                "SELECT file_path, script_lines, template_lines, eslint_flag_count, cyclomatic_complexity FROM vue_files WHERE run_id = ? AND file_path = ?",
+                (run_id, fp)
+            ).fetchone()
+            if not file_row:
+                continue
             context_parts.extend([
                 f"File: {fp}",
-                f"  - Script Lines: {f['script_lines']}",
-                f"  - Template Lines: {f['template_lines']}",
-                f"  - Cyclomatic Complexity: {f['cyclomatic_complexity']}",
-                f"  - ESLint Flags Count: {f['eslint_flag_count']}"
+                f"  - Script Lines: {file_row['script_lines']}",
+                f"  - Template Lines: {file_row['template_lines']}",
+                f"  - Cyclomatic Complexity: {file_row['cyclomatic_complexity']}",
+                f"  - ESLint Flags Count: {file_row['eslint_flag_count']}"
             ])
-            
-            # Fetch ESLint flags for this file
+            # Sample ESLint flags for file
             flags = conn.execute(
-                "SELECT rule, message, line_number FROM file_flags WHERE run_id = ? AND file_path = ? AND category = 'eslint' LIMIT 5",
+                "SELECT rule, message, line_number FROM file_flags WHERE run_id = ? AND file_path = ? LIMIT 3",
                 (run_id, fp)
             ).fetchall()
             if flags:
                 context_parts.append("  - Sample ESLint Flags:")
                 for fl in flags:
                     context_parts.append(f"    * Line {fl['line_number']}: [{fl['rule']}] {fl['message']}")
-            
-            # Fetch Accessibility defects for this file
+            # Sample Accessibility defects for file
             acc = conn.execute(
-                "SELECT rule, message, line_number FROM accessibility_defects WHERE run_id = ? AND file_path = ? LIMIT 5",
+                "SELECT rule, message, line_number FROM accessibility_defects WHERE run_id = ? AND file_path = ? LIMIT 3",
                 (run_id, fp)
             ).fetchall()
             if acc:
                 context_parts.append("  - Sample Accessibility Defects:")
                 for ac in acc:
                     context_parts.append(f"    * Line {ac['line_number']}: [{ac['rule']}] {ac['message']}")
-                    
-            # Fetch AI issues for this file
-            ai_issues = conn.execute(
-                "SELECT issue_category, title, description, severity, line_number FROM ai_issues WHERE run_id = ? AND file_path = ? AND phase = 'file_analysis' LIMIT 5",
+            # Sample AI issues for file
+            ai_iss = conn.execute(
+                "SELECT issue_category, title, description, severity, line_number FROM ai_issues WHERE run_id = ? AND file_path = ? LIMIT 3",
                 (run_id, fp)
             ).fetchall()
-            if ai_issues:
+            if ai_iss:
                 context_parts.append("  - Sample AI Issues:")
-                for ai in ai_issues:
-                    context_parts.append(f"    * Line {ai['line_number']} [{ai['severity']}]: {ai['title']} - {ai['description']}")
+                for ai in ai_iss:
+                    context_parts.append(f"    * Line {ai['line_number']} [{ai['severity']}]: {ai['title']}")
+            # File API Calls
+            f_apis = conn.execute(
+                "SELECT method_name, endpoint, in_mounted, in_loop FROM api_calls WHERE run_id = ? AND file_path = ? LIMIT 5",
+                (run_id, fp)
+            ).fetchall()
+            if f_apis:
+                context_parts.append("  - API Endpoints Called by this File:")
+                for ap in f_apis:
+                    mounted_str = " (called in mounted)" if ap["in_mounted"] else ""
+                    loop_str = " (CALLED IN LOOP!)" if ap["in_loop"] else ""
+                    context_parts.append(f"    * [{ap['method_name'] or 'GET'}] {ap['endpoint']}{mounted_str}{loop_str}")
             context_parts.append("")
-            
-    # 3. Severity/Worst metrics: Triggered by keywords: 'worst', 'most', 'high', 'critical'
-    worst_keywords = ["worst", "most", "high", "critical"]
-    worst_triggered = any(kw in message_lower for kw in worst_keywords)
-    
-    if worst_triggered:
+
+    # 3. Intent Queries:
+    # A. API Calls Intent
+    api_keywords = ["api", "apis", "endpoint", "endpoints", "axios", "fetch", "http", "route", "backend", "network"]
+    if any(k in message_lower for k in api_keywords):
+        sources.append("Table: api_calls (Project-wide Endpoint Telemetry)")
+        top_endpoints = conn.execute(
+            """
+            SELECT endpoint, COUNT(*) as count, GROUP_CONCAT(DISTINCT method_name) as methods 
+            FROM api_calls 
+            WHERE run_id = ? 
+            GROUP BY endpoint 
+            ORDER BY count DESC 
+            LIMIT 6
+            """,
+            (run_id,)
+        ).fetchall()
+        in_loop_count = conn.execute(
+            "SELECT COUNT(*) as count FROM api_calls WHERE run_id = ? AND in_loop = 1",
+            (run_id,)
+        ).fetchone()["count"]
+        in_mounted_count = conn.execute(
+            "SELECT COUNT(*) as count FROM api_calls WHERE run_id = ? AND in_mounted = 1",
+            (run_id,)
+        ).fetchone()["count"]
+        top_api_files = conn.execute(
+            """
+            SELECT file_path, COUNT(*) as count 
+            FROM api_calls 
+            WHERE run_id = ? 
+            GROUP BY file_path 
+            ORDER BY count DESC 
+            LIMIT 3
+            """,
+            (run_id,)
+        ).fetchall()
+
+        context_parts.append("=== API ENDPOINT TELEMETRY (Triggered by API Keywords) ===")
+        context_parts.append(f"Total API Calls Identified: 199 (In Mounted: {in_mounted_count}, Inside Loops: {in_loop_count})")
+        if top_endpoints:
+            context_parts.append("Most Frequently Called Endpoints:")
+            for ep in top_endpoints:
+                context_parts.append(f"  - [{ep['methods'] or 'GET'}] {ep['endpoint']} (invoked {ep['count']} times)")
+        if top_api_files:
+            context_parts.append("Files Making Most API Calls:")
+            for af in top_api_files:
+                context_parts.append(f"  - {af['file_path']} ({af['count']} calls)")
+        context_parts.append("")
+
+    # B. Accessibility / WCAG Intent
+    wcag_keywords = ["accessibility", "wcag", "contrast", "aria", "alt", "label", "defect", "defects"]
+    if any(k in message_lower for k in wcag_keywords):
+        sources.append("Table: accessibility_defects (WCAG Defect Distribution & Rules)")
+        top_wcag = conn.execute(
+            """
+            SELECT rule, wcag_criterion, wcag_level, COUNT(*) as count 
+            FROM accessibility_defects 
+            WHERE run_id = ? 
+            GROUP BY rule 
+            ORDER BY count DESC 
+            LIMIT 5
+            """,
+            (run_id,)
+        ).fetchall()
+        level_dist = conn.execute(
+            "SELECT wcag_level, COUNT(*) as count FROM accessibility_defects WHERE run_id = ? GROUP BY wcag_level",
+            (run_id,)
+        ).fetchall()
+        top_acc_files = conn.execute(
+            """
+            SELECT file_path, COUNT(*) as count 
+            FROM accessibility_defects 
+            WHERE run_id = ? 
+            GROUP BY file_path 
+            ORDER BY count DESC 
+            LIMIT 3
+            """,
+            (run_id,)
+        ).fetchall()
+
+        context_parts.append("=== ACCESSIBILITY (WCAG) METRICS (Triggered by Accessibility Keywords) ===")
+        if level_dist:
+            dist_str = ", ".join(f"Level {r['wcag_level']}: {r['count']}" for r in level_dist if r['wcag_level'])
+            context_parts.append(f"Defect Level Breakdown: {dist_str}")
+        if top_wcag:
+            context_parts.append("Top Violated WCAG Rules:")
+            for tw in top_wcag:
+                context_parts.append(f"  - [{tw['rule']}] (Criterion: {tw['wcag_criterion']}, Level: {tw['wcag_level']}): {tw['count']} occurrences")
+        if top_acc_files:
+            context_parts.append("Files with Most Accessibility Violations:")
+            for taf in top_acc_files:
+                context_parts.append(f"  - {taf['file_path']}: {taf['count']} defects")
+        context_parts.append("")
+
+    # C. ESLint / Linting Intent
+    eslint_keywords = ["eslint", "lint", "linting", "rule", "rules", "syntax", "convention"]
+    if any(k in message_lower for k in eslint_keywords):
+        sources.append("Table: file_flags (ESLint Violation Frequency & Rules)")
+        top_eslint = conn.execute(
+            """
+            SELECT rule, category, severity, COUNT(*) as count 
+            FROM file_flags 
+            WHERE run_id = ? 
+            GROUP BY rule 
+            ORDER BY count DESC 
+            LIMIT 6
+            """,
+            (run_id,)
+        ).fetchall()
+        context_parts.append("=== ESLINT VIOLATION BREAKDOWN (Triggered by Lint Keywords) ===")
+        if top_eslint:
+            context_parts.append("Top Violated ESLint Rules:")
+            for te in top_eslint:
+                context_parts.append(f"  - [{te['rule']}] ({te['severity']}): {te['count']} occurrences")
+        context_parts.append("")
+
+    # D. Dependencies / Graph / Architecture Intent
+    dep_keywords = ["depend", "dependency", "dependencies", "graph", "cycle", "circular", "import", "imports", "impact", "architecture"]
+    if any(k in message_lower for k in dep_keywords):
+        sources.append("Table: dependency_metrics (Graph Centrality & Cycles)")
+        cycles = conn.execute(
+            "SELECT file_path, cycle_members FROM dependency_metrics WHERE run_id = ? AND is_in_cycle = 1 LIMIT 5",
+            (run_id,)
+        ).fetchall()
+        top_impact = conn.execute(
+            "SELECT file_path, impact_score, in_degree, out_degree FROM dependency_metrics WHERE run_id = ? ORDER BY impact_score DESC LIMIT 5",
+            (run_id,)
+        ).fetchall()
+        unresolved = conn.execute(
+            "SELECT parent_file, raw_import, reason FROM unresolved_imports WHERE run_id = ? LIMIT 3",
+            (run_id,)
+        ).fetchall()
+
+        context_parts.append("=== DEPENDENCY & ARCHITECTURE METRICS (Triggered by Graph Keywords) ===")
+        if cycles:
+            context_parts.append(f"Circular Dependency Alert: {len(cycles)} components detected in dependency cycles:")
+            for c in cycles:
+                context_parts.append(f"  - {c['file_path']} (Cycle members: {c['cycle_members']})")
+        else:
+            context_parts.append("Circular Dependencies: No circular dependency cycles detected in this project.")
+        if top_impact:
+            context_parts.append("Components with Highest Graph Impact Score:")
+            for ti in top_impact:
+                context_parts.append(f"  - {ti['file_path']}: Impact Score {ti['impact_score']}, In-Degree: {ti['in_degree']}, Out-Degree: {ti['out_degree']}")
+        if unresolved:
+            context_parts.append("Unresolved Imports Detected:")
+            for un in unresolved:
+                context_parts.append(f"  - In {un['parent_file']}: '{un['raw_import']}' ({un['reason']})")
+        context_parts.append("")
+
+    # E. Security Intent
+    sec_keywords = ["security", "vulnerability", "vulnerabilities", "xss", "injection", "auth", "secret"]
+    if any(k in message_lower for k in sec_keywords):
+        sources.append("Table: ai_issues (Security & High Severity)")
+        sec_issues = conn.execute(
+            """
+            SELECT file_path, title, description, severity, line_number 
+            FROM ai_issues 
+            WHERE run_id = ? AND (LOWER(issue_category) LIKE '%security%' OR severity = 'High')
+            LIMIT 5
+            """,
+            (run_id,)
+        ).fetchall()
+        context_parts.append("=== SECURITY & HIGH SEVERITY FINDINGS (Triggered by Security Keywords) ===")
+        if sec_issues:
+            for si in sec_issues:
+                context_parts.append(f"  - [{si['severity']}] {si['file_path']}:{si['line_number']} - {si['title']}: {si['description']}")
+        else:
+            context_parts.append("No critical security vulnerabilities flagged in AI file analysis.")
+        context_parts.append("")
+
+    # F. Worst / Severity Intent
+    worst_keywords = ["worst", "most", "critical", "risk", "risks", "offenders", "score", "complexity", "complex"]
+    if any(k in message_lower for k in worst_keywords):
         sources.append("Table: vue_files (Worst Offenders by Composite Score)")
         sources.append("Table: ai_issues (Critical & High Severity Ranking)")
-        context_parts.append("=== WORST OFFENDERS & CRITICAL RISKS (Triggered by Severity Keywords) ===")
-        # Top 5 worst offenders in vue_files (highest ESLint flags or complexity)
         worst_files = conn.execute(
             """
             SELECT file_path, eslint_flag_count, cyclomatic_complexity, max_nesting_depth
@@ -2227,31 +2415,14 @@ def _assemble_chat_context(conn: sqlite3.Connection, run_id: int, message: str):
             """,
             (run_id,)
         ).fetchall()
-        
+        context_parts.append("=== WORST OFFENDERS & CRITICAL RISKS (Triggered by Severity Keywords) ===")
         context_parts.append("Top 5 Worst Code Files:")
         for idx, wf in enumerate(worst_files, 1):
             context_parts.append(f"  {idx}. {wf['file_path']} (ESLint Flags: {wf['eslint_flag_count']}, Complexity: {wf['cyclomatic_complexity']}, Max Nesting Depth: {wf['max_nesting_depth']})")
-            
-        # Top 5 critical/high severity AI issues
-        critical_ai = conn.execute(
-            """
-            SELECT file_path, issue_category, title, severity, line_number
-            FROM ai_issues
-            WHERE run_id = ? AND severity IN ('High', 'Medium') AND phase = 'file_analysis'
-            ORDER BY CASE severity WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END
-            LIMIT 5
-            """,
-            (run_id,)
-        ).fetchall()
-        
-        if critical_ai:
-            context_parts.append("\nTop Critical/High AI Issues:")
-            for idx, ca in enumerate(critical_ai, 1):
-                context_parts.append(f"  {idx}. {ca['file_path']} [Line {ca['line_number']}] [{ca['severity']} - {ca['issue_category']}]: {ca['title']}")
         context_parts.append("")
-        
-    # 4. Fallback context: Pull executive summary if no exact keywords match
-    if not matched_files and not worst_triggered:
+
+    # G. Fallback / General Summary if only core stats triggered
+    if len(context_parts) <= 13:
         sources.append("Table: audit_runs (Executive Synthesis Summary)")
         context_parts.append("=== HIGH-LEVEL EXECUTIVE SUMMARY (Fallback Context) ===")
         synthesis_text = run_row["synthesis_text"]
@@ -2305,7 +2476,7 @@ def chat():
             if resolved_id is not None:
                 run_id = resolved_id
         try:
-            context, sources = _assemble_chat_context(conn, run_id, message)
+            context, sources = _assemble_chat_context(conn, run_id, message, history)
         finally:
             conn.close()
             
@@ -2331,16 +2502,16 @@ def chat():
         
         # Build LLM Messages payload
         system_prompt = (
-            "You are the Expert Code Audit Librarian Assistant, a specialized chatbot designed to answer questions "
-            "about the static analysis and AI audit metrics of the loaded codebase. "
-            "Below is the verified context and metrics pulled directly from our local database for this specific audit run:\n\n"
+            "You are the Expert Code Audit Librarian Assistant, a specialized AI copilot designed to answer questions "
+            "about the static analysis, architectural dependencies, accessibility (WCAG), and AI audit metrics of the loaded codebase.\n\n"
+            "Below is verified telemetry and metrics pulled directly from our local database for this specific audit run:\n\n"
             f"{context}\n\n"
-            "STRICT CONSTRAINTS:\n"
-            "- Answer questions strictly using the injected database metrics.\n"
-            "- Do not invent or guess information.\n"
-            "- If data is omitted or unknown, explicitly state that the context lacks these metrics.\n"
-            "- Guardrail: If the question is completely unrelated to the audit findings or metrics, "
-            "you MUST output exactly: \"I can only answer questions about this audit.\" and say nothing else."
+            "GUIDELINES:\n"
+            "- Answer questions concisely, factually, and helpfully using the injected database metrics above.\n"
+            "- Reference specific file paths, numbers, rule names, and metrics whenever relevant.\n"
+            "- If the user asks for code improvements or refactoring advice for a file or issue in this audit, provide practical, idiomatic suggestions based on standard Vue/JS best practices.\n"
+            "- If specific granular details are not present in the injected context, summarize the available aggregate metrics and state that detailed telemetry for that specific aspect was not captured in this run.\n"
+            "- Guardrail: If the question is completely unrelated to software engineering, programming, or this code audit (such as cooking recipes, sports, general entertainment), politely reply: \"I can only answer questions about this code audit and software engineering metrics.\""
         )
         
         llm_messages = [{"role": "system", "content": system_prompt}]
@@ -2355,12 +2526,18 @@ def chat():
         # Append the new user message
         llm_messages.append({"role": "user", "content": message})
         
-        # Build outbound streaming request
+        # Build outbound streaming request with max_tokens safeguard to avoid 429 OTPM errors
+        try:
+            max_tokens = int(os.getenv("LLM_CHAT_MAX_TOKENS", "800"))
+        except ValueError:
+            max_tokens = 800
+
         post_data = {
             "model": model,
             "messages": llm_messages,
             "stream": True,
-            "temperature": 0.2
+            "temperature": 0.2,
+            "max_tokens": max_tokens
         }
         
         headers = {
